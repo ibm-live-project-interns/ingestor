@@ -1,0 +1,7 @@
+{
+    "critical": "agents_api",
+    "config_change": "rag_connector",
+    "performance": "context_retrieval",
+    "default": "agents_api"
+  }
+  
