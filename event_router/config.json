@@ -1,7 +1,6 @@
 {
-    "critical": "agents_api",
-    "config_change": "rag_connector",
-    "performance": "context_retrieval",
-    "default": "agents_api"
+    "critical": "http://localhost:9000/events",
+    "warning": "http://localhost:9000/events",
+    "info": "http://localhost:9000/events"
   }
   
