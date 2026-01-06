@@ -1,0 +1,6 @@
+{
+    "critical": "http://localhost:9000/events",
+    "warning": "http://localhost:9000/events",
+    "info": "http://localhost:9000/events"
+  }
+  
