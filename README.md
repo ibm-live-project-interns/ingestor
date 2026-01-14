@@ -16,9 +16,18 @@ Backend microservices for the NOC Dashboard - handles data ingestion, event rout
                  ┌─────────────┐                 ┌─────────────┐  ┌─────────────┐
                  │ Agents API  │                 │ API Gateway │  │   Kafka     │
                  │   :9000     │                 │   :8080     │  │   :9092     │
-                 │  (watsonx)  │                 │             │  │             │
-                 └─────────────┘                 └─────────────┘  └─────────────┘
+                 │  (watsonx)  │                 │  (Direct)   │  │             │
+                 └─────────────┘                 └──────┬──────┘  └─────────────┘
+                                                        │
+                                                        │ Proxied by nginx
+                                                        ▼
+                                                 ┌─────────────┐
+                                                 │ UI (nginx)  │
+                                                 │   :3000     │
+                                                 └─────────────┘
 ```
+
+**Note:** The UI at port 3000 uses nginx to proxy API requests to the API Gateway at port 8080.
 
 ## Services
 
@@ -118,16 +127,20 @@ KAFKA_BROKERS=localhost:9092
 
 ## API Authentication
 
+**Demo Mode:** Accepts any non-empty username and password.
+
 ```bash
-# Login
+# Login (Direct API access on port 8080)
 curl -X POST http://localhost:8080/api/v1/login \
   -H "Content-Type: application/json" \
-  -d '{"username": "admin", "password": "password"}'
+  -d '{"username": "admin", "password": "admin123", "role": {"id": "admin", "text": "Administrator"}}'
 
 # Use token
 curl http://localhost:8080/api/v1/alerts \
   -H "Authorization: Bearer <your-token>"
 ```
+
+**Note:** When using the web UI at `http://localhost:3000`, nginx proxies API requests from port 3000 to port 8080.
 
 ## Health Checks
 
