@@ -7,12 +7,12 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/gin-gonic/gin"
 )
 
 // Metadata is what the datasource / upstream sends to Ingestor Core.
-// You can extend this later as needed.
 type Metadata struct {
 	Router string `json:"router"`         // e.g. router id / name
 	Note   string `json:"note"`           // description / message
@@ -20,21 +20,23 @@ type Metadata struct {
 }
 
 // RoutedEvent is what we actually send to the Event Router.
-// It matches the Event struct expected by event_router:
-//
-//	type + message
 type RoutedEvent struct {
 	Type    string `json:"type"`
 	Message string `json:"message"`
 }
 
+func getEnv(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}
+
 // forwardToRouter takes incoming metadata, converts it to a RoutedEvent,
-// and forwards it to the Event Router on :8081.
-func forwardToRouter(meta Metadata) (string, error) {
-	// Map metadata to the event format expected by Event Router.
+// and forwards it to the Event Router.
+func forwardToRouter(meta Metadata, eventRouterURL string) (string, error) {
 	eventType := meta.Type
 	if eventType == "" {
-		// Default to "info" if not provided
 		eventType = "info"
 	}
 
@@ -48,7 +50,7 @@ func forwardToRouter(meta Metadata) (string, error) {
 		return "", fmt.Errorf("failed to marshal event: %w", err)
 	}
 
-	url := "http://localhost:8081/route"
+	url := eventRouterURL + "/route"
 
 	resp, err := http.Post(url, "application/json", bytes.NewBuffer(payload))
 	if err != nil {
@@ -65,13 +67,20 @@ func forwardToRouter(meta Metadata) (string, error) {
 }
 
 func main() {
+	port := getEnv("INGESTOR_CORE_PORT", "8001")
+	eventRouterURL := getEnv("EVENT_ROUTER_URL", "http://localhost:8082")
+
 	router := gin.Default()
+
+	// Health check endpoint
+	router.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "healthy", "service": "ingestor-core"})
+	})
 
 	// Ingestor Core metadata endpoint
 	router.POST("/ingest/metadata", func(c *gin.Context) {
 		var meta Metadata
 
-		// Bind incoming JSON to Metadata struct
 		if err := c.ShouldBindJSON(&meta); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": fmt.Sprintf("invalid payload: %v", err),
@@ -79,8 +88,7 @@ func main() {
 			return
 		}
 
-		// Forward to Event Router
-		routerResp, err := forwardToRouter(meta)
+		routerResp, err := forwardToRouter(meta, eventRouterURL)
 		if err != nil {
 			log.Println("Error forwarding to Event Router:", err)
 			c.JSON(http.StatusBadGateway, gin.H{
@@ -90,7 +98,6 @@ func main() {
 			return
 		}
 
-		// Successful flow
 		c.JSON(http.StatusOK, gin.H{
 			"status":          "received",
 			"forwarded_to":    "event_router",
@@ -98,8 +105,8 @@ func main() {
 		})
 	})
 
-	log.Println("🌟 Ingestor Core running on :8001")
-	if err := router.Run(":8001"); err != nil {
+	log.Printf("🌟 Ingestor Core running on :%s (Event Router: %s)\n", port, eventRouterURL)
+	if err := router.Run(":" + port); err != nil {
 		log.Fatal("failed to start Ingestor Core:", err)
 	}
 }
