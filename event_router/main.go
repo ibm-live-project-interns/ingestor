@@ -10,22 +10,20 @@ import (
 	"os"
 
 	"github.com/gin-gonic/gin"
+	"github.com/ibm-live-project-interns/ingestor/shared/config"
 )
 
 type Event struct {
-	Type    string `json:"type"`
-	Message string `json:"message"`
-}
-
-func getEnv(key, fallback string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
-	}
-	return fallback
+	Type       string `json:"type"`
+	Message    string `json:"message"`
+	SourceHost string `json:"source_host,omitempty"`
+	SourceIP   string `json:"source_ip,omitempty"`
+	EventType  string `json:"event_type,omitempty"`
+	Category   string `json:"category,omitempty"`
 }
 
 func loadConfig() map[string]string {
-	configPath := getEnv("EVENT_ROUTER_CONFIG_PATH", "config.json")
+	configPath := config.GetEnv("EVENT_ROUTER_CONFIG_PATH", "config.json")
 	data, err := os.ReadFile(configPath)
 	if err != nil {
 		log.Fatalf("Error reading config file %s: %v", configPath, err)
@@ -51,8 +49,8 @@ func forwardEvent(url string, event Event) (string, error) {
 }
 
 func main() {
-	port := getEnv("EVENT_ROUTER_PORT", "8082")
-	
+	port := config.GetEnv("EVENT_ROUTER_PORT", "8082")
+
 	router := gin.Default()
 	config := loadConfig()
 

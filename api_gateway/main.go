@@ -279,18 +279,18 @@ var usersStore = map[string]User{
 
 // Ticket model
 type Ticket struct {
-	ID          string `json:"id"`
+	ID           string `json:"id"`
 	TicketNumber string `json:"ticketNumber"`
-	AlertID     string `json:"alertId,omitempty"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Priority    string `json:"priority"`
-	Status      string `json:"status"`
-	DeviceName  string `json:"deviceName"`
-	AssignedTo  string `json:"assignedTo"`
-	CreatedAt   string `json:"createdAt"`
-	UpdatedAt   string `json:"updatedAt"`
-	CreatedBy   string `json:"createdBy"`
+	AlertID      string `json:"alertId,omitempty"`
+	Title        string `json:"title"`
+	Description  string `json:"description"`
+	Priority     string `json:"priority"`
+	Status       string `json:"status"`
+	DeviceName   string `json:"deviceName"`
+	AssignedTo   string `json:"assignedTo"`
+	CreatedAt    string `json:"createdAt"`
+	UpdatedAt    string `json:"updatedAt"`
+	CreatedBy    string `json:"createdBy"`
 }
 
 // Tickets store
@@ -520,8 +520,8 @@ func getAlertByID(c *gin.Context) {
 				Alert:         alert,
 				SimilarEvents: 7,
 				AIAnalysis: AIAnalysis{
-					Summary:      "The network interface has transitioned to a down state while the administrative status remains up.",
-					RootCauses:   []string{"Physical layer failure detected", "Possible cable fault or SFP failure", "Remote device may be powered off"},
+					Summary:        "The network interface has transitioned to a down state while the administrative status remains up.",
+					RootCauses:     []string{"Physical layer failure detected", "Possible cable fault or SFP failure", "Remote device may be powered off"},
 					BusinessImpact: "High - Loss of redundancy to distribution layer.",
 					RecommendedActions: []string{
 						"Verify physical cable connection",
@@ -815,7 +815,7 @@ func updateTicket(c *gin.Context) {
 				ticketsStore[i].AssignedTo = req.AssignedTo
 			}
 			ticketsStore[i].UpdatedAt = time.Now().Format("2006-01-02 15:04:05")
-			
+
 			log.Printf("🎟️ Ticket %s updated by %s", ticket.TicketNumber, c.GetString("username"))
 			c.JSON(http.StatusOK, ticketsStore[i])
 			return
@@ -833,13 +833,35 @@ func exportReport(c *gin.Context) {
 // Ingest endpoint
 func ingestEvent(c *gin.Context) {
 	var event struct {
-		Type    string `json:"type"`
-		Message string `json:"message"`
+		Type       string `json:"type"`
+		Message    string `json:"message"`
+		SourceHost string `json:"source_host"`
+		SourceIP   string `json:"source_ip"`
+		EventType  string `json:"event_type"`
+		Category   string `json:"category"`
 	}
 
 	if err := c.ShouldBindJSON(&event); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+
+	// Use device info from event, with fallbacks
+	deviceName := event.SourceHost
+	if deviceName == "" {
+		deviceName = "Unknown Device"
+	}
+	deviceIP := event.SourceIP
+	if deviceIP == "" {
+		deviceIP = "0.0.0.0"
+	}
+
+	// Determine icon based on event type
+	icon := "server"
+	if event.EventType == "snmp" {
+		icon = "router"
+	} else if event.Category == "network" || event.Category == "infrastructure" {
+		icon = "switch"
 	}
 
 	newAlert := Alert{
@@ -851,9 +873,9 @@ func ingestEvent(c *gin.Context) {
 			Relative: "just now",
 		},
 		Device: DeviceInfo{
-			Name: "Unknown Device",
-			IP:   "0.0.0.0",
-			Icon: "server",
+			Name: deviceName,
+			IP:   deviceIP,
+			Icon: icon,
 		},
 		AITitle:    event.Message,
 		AISummary:  "Event received: " + event.Message,
@@ -861,7 +883,7 @@ func ingestEvent(c *gin.Context) {
 	}
 
 	alertsStore = append([]Alert{newAlert}, alertsStore...)
-	log.Printf("📨 Ingested event: type=%s", event.Type)
+	log.Printf("📨 Ingested event: type=%s, device=%s, ip=%s", event.Type, deviceName, deviceIP)
 	c.JSON(http.StatusOK, gin.H{"status": "ingested", "alert_id": newAlert.ID})
 }
 
@@ -869,6 +891,12 @@ func mapEventTypeToSeverity(eventType string) string {
 	switch eventType {
 	case "critical":
 		return "critical"
+	case "high":
+		return "major"
+	case "medium":
+		return "minor"
+	case "low", "info":
+		return "info"
 	case "warning":
 		return "major"
 	default:
@@ -900,6 +928,13 @@ func main() {
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))
+
+	// Internal API routes (service-to-service, no auth)
+	internal := router.Group("/api/internal")
+	{
+		internal.POST("/events", ingestEvent)
+		internal.GET("/health", getHealth)
+	}
 
 	// API v1 routes
 	v1 := router.Group("/api/v1")

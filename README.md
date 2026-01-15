@@ -5,29 +5,38 @@ Backend microservices for the NOC Dashboard - handles data ingestion, event rout
 ## Architecture
 
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+┌─────────────────┐      ┌─────────────────┐     ┌─────────────────┐
 │   Datasource    │────▶│  Ingestor Core  │────▶│  Event Router   │
-│   (External)    │     │     :8001       │     │     :8082       │
-└─────────────────┘     └─────────────────┘     └────────┬────────┘
+│   (External)    │      │     :8001       │     │     :8082       │
+└─────────────────┘      └─────────────────┘     └────────┬────────┘
+                                                          │
+                         ┌────────────────────────────────┼────────────────┐
+                         │                                │                │
+                         ▼                                ▼                ▼
+                  ┌─────────────┐                 ┌─────────────┐  ┌─────────────┐
+                  │ Agents API  │                 │ API Gateway │  │   Kafka     │
+                  │   :9000     │                 │   :8080     │  │   :9092     │
+                  │  (watsonx)  │                 │  (Direct)   │  │             │
+                  └─────────────┘                 └──────┬──────┘  └─────────────┘
                                                          │
-                        ┌────────────────────────────────┼────────────────┐
-                        │                                │                │
-                        ▼                                ▼                ▼
-                 ┌─────────────┐                 ┌─────────────┐  ┌─────────────┐
-                 │ Agents API  │                 │ API Gateway │  │   Kafka     │
-                 │   :9000     │                 │   :8080     │  │   :9092     │
-                 │  (watsonx)  │                 │  (Direct)   │  │             │
-                 └─────────────┘                 └──────┬──────┘  └─────────────┘
-                                                        │
-                                                        │ Proxied by nginx
-                                                        ▼
-                                                 ┌─────────────┐
-                                                 │ UI (nginx)  │
-                                                 │   :3000     │
-                                                 └─────────────┘
+                                                         │ Proxied by nginx
+                                                         ▼
+                                                  ┌─────────────┐
+                                                  │ UI (nginx)  │
+                                                  │   :3000     │
+                                                  └─────────────┘
 ```
 
 **Note:** The UI at port 3000 uses nginx to proxy API requests to the API Gateway at port 8080.
+
+## Shared Package
+
+All services use a common `shared/` package for:
+- **Models** (`shared/models/event.go`) - `Event`, `RoutedEvent` structs
+- **Constants** (`shared/constants/`) - Severity levels, event types
+- **Config** (`shared/config/env.go`) - `GetEnv()` helper
+
+This eliminates code duplication across services.
 
 ## Services
 
@@ -49,6 +58,7 @@ REST API serving the UI with authentication and authorization.
 | GET | `/api/v1/alerts` | List all alerts |
 | GET | `/api/v1/alerts/:id` | Get alert details |
 | POST | `/api/v1/tickets` | Create ticket |
+| POST | `/api/internal/events` | Internal API (no auth) for service-to-service |
 | GET | `/api/v1/health` | Health check |
 
 ### 2. Ingestor Core (Port 8001)
@@ -63,6 +73,17 @@ Central ingestion point for all network events.
 ### 3. Event Router (Port 8082)
 
 Routes events to appropriate downstream services based on event type.
+
+**Configuration** (`config.json`):
+```json
+{
+  "critical": "http://api-gateway:8080/api/internal/events",
+  "warning": "http://api-gateway:8080/api/internal/events",
+  "info": "http://api-gateway:8080/api/internal/events"
+}
+```
+
+**Note:** Uses Docker service name `api-gateway` and internal endpoint (no auth required).
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
