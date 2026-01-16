@@ -1,6 +1,7 @@
 {
-    "critical": "http://localhost:9000/events",
-    "warning": "http://localhost:9000/events",
-    "info": "http://localhost:9000/events"
-  }
-  
+  "critical": "http://api-gateway:8080/api/internal/events",
+  "high": "http://api-gateway:8080/api/internal/events",
+  "medium": "http://api-gateway:8080/api/internal/events",
+  "low": "http://api-gateway:8080/api/internal/events",
+  "info": "http://api-gateway:8080/api/internal/events"
+}

@@ -9,50 +9,26 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/ibm-live-project-interns/ingestor/shared/config"
+	"github.com/ibm-live-project-interns/ingestor/shared/models"
 )
 
-// Metadata is what the datasource / upstream sends to Ingestor Core.
-// You can extend this later as needed.
-type Metadata struct {
-	Router string `json:"router"`         // e.g. router id / name
-	Note   string `json:"note"`           // description / message
-	Type   string `json:"type,omitempty"` // optional, falls back to "info"
-}
+// forwardToRouter takes an Event, converts it to a RoutedEvent, and forwards to Event Router
+func forwardToRouter(event models.Event, eventRouterURL string) (string, error) {
+	// Use the shared model's ToRoutedEvent method
+	routedEvent := event.ToRoutedEvent()
+	// Override message to include more context
+	routedEvent.Message = fmt.Sprintf("[%s] %s: %s", event.EventType, event.SourceHost, event.Message)
 
-// RoutedEvent is what we actually send to the Event Router.
-// It matches the Event struct expected by event_router:
-//
-//	type + message
-type RoutedEvent struct {
-	Type    string `json:"type"`
-	Message string `json:"message"`
-}
-
-// forwardToRouter takes incoming metadata, converts it to a RoutedEvent,
-// and forwards it to the Event Router on :8081.
-func forwardToRouter(meta Metadata) (string, error) {
-	// Map metadata to the event format expected by Event Router.
-	eventType := meta.Type
-	if eventType == "" {
-		// Default to "info" if not provided
-		eventType = "info"
-	}
-
-	event := RoutedEvent{
-		Type:    eventType,
-		Message: meta.Note,
-	}
-
-	payload, err := json.Marshal(event)
+	payload, err := json.Marshal(routedEvent)
 	if err != nil {
-		return "", fmt.Errorf("failed to marshal event: %w", err)
+		return "", fmt.Errorf("failed to marshal routed event: %w", err)
 	}
 
-	url := "http://localhost:8081/route"
-
+	url := eventRouterURL + "/route"
 	resp, err := http.Post(url, "application/json", bytes.NewBuffer(payload))
 	if err != nil {
-		return "", fmt.Errorf("error calling event router: %w", err)
+		return "", fmt.Errorf("failed to post to event router: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -65,22 +41,35 @@ func forwardToRouter(meta Metadata) (string, error) {
 }
 
 func main() {
+	port := config.GetEnv("INGESTOR_CORE_PORT", "8001")
+	eventRouterURL := config.GetEnv("EVENT_ROUTER_URL", "http://localhost:8082")
+
 	router := gin.Default()
 
-	// Ingestor Core metadata endpoint
-	router.POST("/ingest/metadata", func(c *gin.Context) {
-		var meta Metadata
+	// Health check endpoint
+	router.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "healthy", "service": "ingestor-core"})
+	})
 
-		// Bind incoming JSON to Metadata struct
-		if err := c.ShouldBindJSON(&meta); err != nil {
+	// Main event ingestion endpoint
+	router.POST("/ingest/event", func(c *gin.Context) {
+		var event models.Event
+
+		if err := c.ShouldBindJSON(&event); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": fmt.Sprintf("invalid payload: %v", err),
 			})
 			return
 		}
 
-		// Forward to Event Router
-		routerResp, err := forwardToRouter(meta)
+		if err := event.Validate(); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("validation failed: %v", err),
+			})
+			return
+		}
+
+		routerResp, err := forwardToRouter(event, eventRouterURL)
 		if err != nil {
 			log.Println("Error forwarding to Event Router:", err)
 			c.JSON(http.StatusBadGateway, gin.H{
@@ -90,16 +79,66 @@ func main() {
 			return
 		}
 
-		// Successful flow
 		c.JSON(http.StatusOK, gin.H{
 			"status":          "received",
+			"event_type":      event.EventType,
+			"severity":        event.Severity,
 			"forwarded_to":    "event_router",
 			"router_response": routerResp,
 		})
 	})
 
-	log.Println("🌟 Ingestor Core running on :8001")
-	if err := router.Run(":8001"); err != nil {
-		log.Fatal("failed to start Ingestor Core:", err)
+	// LEGACY: Keep /ingest/metadata for backwards compatibility (deprecated)
+	router.POST("/ingest/metadata", func(c *gin.Context) {
+		log.Println("Warning: /ingest/metadata is deprecated, use /ingest/event instead")
+
+		type Metadata struct {
+			Router string `json:"router"`
+			Note   string `json:"note"`
+			Type   string `json:"type,omitempty"`
+		}
+
+		var meta Metadata
+		if err := c.ShouldBindJSON(&meta); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("invalid payload: %v", err),
+			})
+			return
+		}
+
+		eventType := meta.Type
+		if eventType == "" {
+			eventType = "info"
+		}
+
+		routedEvent := models.RoutedEvent{
+			Type:    eventType,
+			Message: meta.Note,
+		}
+
+		payload, _ := json.Marshal(routedEvent)
+		url := eventRouterURL + "/route"
+		resp, err := http.Post(url, "application/json", bytes.NewBuffer(payload))
+		if err != nil {
+			log.Println("Error forwarding to Event Router:", err)
+			c.JSON(http.StatusBadGateway, gin.H{
+				"status": "router_unreachable",
+				"error":  err.Error(),
+			})
+			return
+		}
+		defer resp.Body.Close()
+
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		c.JSON(http.StatusOK, gin.H{
+			"status":          "received",
+			"forwarded_to":    "event_router",
+			"router_response": string(bodyBytes),
+		})
+	})
+
+	log.Printf("Ingestor Core starting on port %s", port)
+	if err := router.Run(":" + port); err != nil {
+		log.Fatal("Failed to start server:", err)
 	}
 }
