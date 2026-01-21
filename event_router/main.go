@@ -53,6 +53,8 @@ func main() {
 
 	router := gin.Default()
 	config := loadConfig()
+		initKafka()
+	defer kafkaProducer.Close()
 
 	// Health check endpoint
 	router.GET("/health", func(c *gin.Context) {
@@ -66,6 +68,10 @@ func main() {
 			c.JSON(400, gin.H{"error": err.Error()})
 			return
 		}
+			if err := publishToKafka(evt); err != nil {
+		c.JSON(500, gin.H{"error": "failed to publish event to kafka"})
+		return
+	}
 
 		destURL, ok := config[evt.Type]
 		if !ok {
