@@ -8,19 +8,12 @@ import (
 	"log"
 	"net/http"
 	"os"
-
+	 "github.com/ibm-live-project-interns/ingestor/shared/models"
 	"github.com/gin-gonic/gin"
 	"github.com/ibm-live-project-interns/ingestor/shared/config"
 )
 
-type Event struct {
-	Type       string `json:"type"`
-	Message    string `json:"message"`
-	SourceHost string `json:"source_host,omitempty"`
-	SourceIP   string `json:"source_ip,omitempty"`
-	EventType  string `json:"event_type,omitempty"`
-	Category   string `json:"category,omitempty"`
-}
+
 
 func loadConfig() map[string]string {
 	configPath := config.GetEnv("EVENT_ROUTER_CONFIG_PATH", "config.json")
@@ -60,14 +53,14 @@ func main() {
 	})
 
 	router.POST("/route", func(c *gin.Context) {
-		var evt Event
+		var evt models.RoutedEvent
 
 		if err := c.ShouldBindJSON(&evt); err != nil {
 			c.JSON(400, gin.H{"error": err.Error()})
 			return
 		}
 
-		destURL, ok := config[evt.Type]
+		destURL, ok := config[evt.EventType]
 		if !ok {
 			c.JSON(400, gin.H{
 				"error": fmt.Sprintf("No route configured for event type: %s", evt.Type),
