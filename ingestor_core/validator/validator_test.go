@@ -51,3 +51,19 @@ func TestValidateEvent_InvalidSeverity(t *testing.T) {
 		t.Fatalf("expected invalid severity error, got nil")
 	}
 }
+func TestValidateEvent_FutureTimestamp(t *testing.T) {
+	event := models.Event{
+		EventType:      "syslog",
+		SourceHost:     "router-1",
+		SourceIP:       "192.168.1.1",
+		Severity:       "critical",
+		Category:       "network",
+		Message:        "Future event",
+		EventTimestamp: time.Now().Add(10 * time.Minute),
+	}
+
+	err := ValidateEvent(event)
+	if err == nil {
+		t.Fatalf("expected future timestamp validation error, got nil")
+	}
+}
