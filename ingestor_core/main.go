@@ -26,35 +26,44 @@ func main() {
 
 	// Main ingestion endpoint
 	router.POST("/ingest/event", func(c *gin.Context) {
-		var raw map[string]interface{}
+	var raw map[string]interface{}
 
-		if err := c.ShouldBindJSON(&raw); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
-			return
-		}
-
-		// Normalize
-		event := normalizer.Normalize(raw)
-
-		// Validate
-		if err := validator.Validate(event); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-
-		// Forward
-		if err := forwarder.Send(event, eventRouterURL); err != nil {
-			c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
-			return
-		}
-
-		c.JSON(http.StatusOK, gin.H{
-			"status":   "accepted",
-			"event_id": event.ID,
-			"type":     event.EventType,
-			"severity": event.Severity,
+	// 1. Parse raw JSON
+	if err := c.ShouldBindJSON(&raw); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "invalid JSON payload",
 		})
+		return
+	}
+
+	// 2. Normalize
+	event := normalizer.Normalize(raw)
+
+	// 3. Validate
+	if err := validator.ValidateEvent(event); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	// 4. Forward to Event Router
+	resp, err := forwarder.Forward(event, eventRouterURL)
+	if err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{
+			"error": err.Error(),
+		})
+		return
+	}
+
+	// 5. Success
+	c.JSON(http.StatusOK, gin.H{
+		"status":       "ingested",
+		"event_type":   event.EventType,
+		"severity":     event.Severity,
+		"router_reply": resp,
 	})
+})
 
 	log.Printf("🚀 Ingestor Core running on :%s", port)
 	log.Fatal(router.Run(":" + port))
