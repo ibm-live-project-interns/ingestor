@@ -6,25 +6,20 @@ import (
 	"github.com/ibm-live-project-interns/ingestor/shared/models"
 )
 
-// Enrich adds system-level metadata to a normalized event.
-// This runs AFTER validation and BEFORE forwarding.
+// Enrich adds derived metadata to an event
 func Enrich(event models.Event) models.Event {
-
-	// Always stamp when ingestor received the event
-	event.ReceivedAt = time.Now().UTC()
-
-	// Default category if missing
+	// Add default category if missing
 	if event.Category == "" {
-		event.Category = "network"
+		event.Category = "general"
 	}
 
-	// Fallback source IP if missing
-	if event.SourceIP == "" {
-		event.SourceIP = "unknown"
-	}
+	// Add enrichment marker
+	event.RawPayload = "[enriched] " + event.RawPayload
 
-	// Track which service processed the event
-	event.Ingestor = "ingestor-core"
+	// Ensure timestamp exists
+	if event.EventTimestamp.IsZero() {
+		event.EventTimestamp = time.Now()
+	}
 
 	return event
 }
