@@ -21,8 +21,25 @@ func main() {
 
 	// Health check
 	router.GET("/health", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"status": "healthy"})
+	status := "healthy"
+
+	// Check Event Router connectivity
+	_, err := http.Get(eventRouterURL + "/health")
+	if err != nil {
+		status = "degraded"
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"service": "ingestor-core",
+		"status":  status,
 	})
+})
+	router.GET("/ready", func(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"service": "ingestor-core",
+		"ready":   true,
+	})
+})
 
 	// Main ingestion endpoint
 	router.POST("/ingest/event", func(c *gin.Context) {
