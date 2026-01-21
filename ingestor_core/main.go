@@ -6,10 +6,10 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/ibm-live-project-interns/ingestor/shared/config"
-	"github.com/ibm-live-project-interns/ingestor/shared/models"
 
 	"ingestor/ingestor_core/normalizer"
 	"ingestor/ingestor_core/validator"
+	"ingestor/ingestor_core/enricher"
 	"ingestor/ingestor_core/forwarder"
 )
 
@@ -26,44 +26,47 @@ func main() {
 
 	// Main ingestion endpoint
 	router.POST("/ingest/event", func(c *gin.Context) {
-	var raw map[string]interface{}
+		var raw map[string]interface{}
 
-	// 1. Parse raw JSON
-	if err := c.ShouldBindJSON(&raw); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "invalid JSON payload",
+		// 1. Parse raw JSON
+		if err := c.ShouldBindJSON(&raw); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": "invalid JSON payload",
+			})
+			return
+		}
+
+		// 2. Normalize (raw → models.Event)
+		event := normalizer.Normalize(raw)
+
+		// 3. Validate normalized event
+		if err := validator.ValidateEvent(event); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		// 4. Enrich event (system metadata)
+		event = enricher.Enrich(event)
+
+		// 5. Forward to Event Router (as RoutedEvent)
+		resp, err := forwarder.Forward(event.ToRoutedEvent(), eventRouterURL)
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{
+				"error": err.Error(),
+			})
+			return
+		}
+
+		// 6. Success response
+		c.JSON(http.StatusOK, gin.H{
+			"status":       "ingested",
+			"event_type":   event.EventType,
+			"severity":     event.Severity,
+			"router_reply": resp,
 		})
-		return
-	}
-
-	// 2. Normalize
-	event := normalizer.Normalize(raw)
-
-	// 3. Validate
-	if err := validator.ValidateEvent(event); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": err.Error(),
-		})
-		return
-	}
-
-	// 4. Forward to Event Router
-	resp, err := forwarder.Forward(event, eventRouterURL)
-	if err != nil {
-		c.JSON(http.StatusBadGateway, gin.H{
-			"error": err.Error(),
-		})
-		return
-	}
-
-	// 5. Success
-	c.JSON(http.StatusOK, gin.H{
-		"status":       "ingested",
-		"event_type":   event.EventType,
-		"severity":     event.Severity,
-		"router_reply": resp,
 	})
-})
 
 	log.Printf("🚀 Ingestor Core running on :%s", port)
 	log.Fatal(router.Run(":" + port))
