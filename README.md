@@ -145,6 +145,16 @@ POSTGRES_DB=noc_alerts
 # Kafka
 KAFKA_BROKERS=localhost:9092
 ```
+### Configuration Notes
+
+- All environment variables are read using the shared `config.GetEnv()` helper
+- Defaults are provided to allow local development without a `.env`
+- Docker Compose injects environment variables automatically
+
+For local development:
+
+```bash
+cp .env.example .env
 
 ## API Authentication
 
@@ -191,3 +201,6 @@ Full documentation is in the [docs repository](https://github.com/ibm-live-proje
 | [ui](https://github.com/ibm-live-project-interns/ui) | Frontend dashboard |
 | [datasource](https://github.com/ibm-live-project-interns/datasource) | Data simulation |
 | [infra](https://github.com/ibm-live-project-interns/infra) | Infrastructure |
+
+
+
