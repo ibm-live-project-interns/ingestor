@@ -31,6 +31,9 @@ func TestNormalize_SyslogEvent(t *testing.T) {
 	if event.SourceHost != "router-1" {
 		t.Errorf("unexpected source_host: %s", event.SourceHost)
 	}
+	if event.EventTimestamp.IsZero() {
+	t.Errorf("expected event_timestamp to be set, got zero value")
+}
 }
 
 func TestNormalize_MetadataDefaults(t *testing.T) {
