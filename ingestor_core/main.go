@@ -11,6 +11,7 @@ import (
 	"ingestor/ingestor_core/validator"
 	"ingestor/ingestor_core/enricher"
 	"ingestor/ingestor_core/forwarder"
+	"ingestor/ingestor_core/health"
 )
 
 func main() {
@@ -19,29 +20,20 @@ func main() {
 
 	router := gin.Default()
 
-	// Health check
+	// ✅ Health check (Ticket #5)
 	router.GET("/health", func(c *gin.Context) {
-	status := "healthy"
+		routerHealth := health.CheckHTTPHealth(eventRouterURL)
 
-	// Check Event Router connectivity
-	_, err := http.Get(eventRouterURL + "/health")
-	if err != nil {
-		status = "degraded"
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"service": "ingestor-core",
-		"status":  status,
+		c.JSON(http.StatusOK, gin.H{
+			"status":  "healthy",
+			"service": "ingestor-core",
+			"dependencies": gin.H{
+				"event_router": routerHealth,
+			},
+		})
 	})
-})
-	router.GET("/ready", func(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"service": "ingestor-core",
-		"ready":   true,
-	})
-})
 
-	// Main ingestion endpoint
+	// ✅ Main ingestion endpoint
 	router.POST("/ingest/event", func(c *gin.Context) {
 		var raw map[string]interface{}
 
@@ -53,10 +45,10 @@ func main() {
 			return
 		}
 
-		// 2. Normalize (raw → models.Event)
+		// 2. Normalize
 		event := normalizer.Normalize(raw)
 
-		// 3. Validate normalized event
+		// 3. Validate
 		if err := validator.ValidateEvent(event); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": err.Error(),
@@ -64,10 +56,10 @@ func main() {
 			return
 		}
 
-		// 4. Enrich event (system metadata)
+		// 4. Enrich
 		event = enricher.Enrich(event)
 
-		// 5. Forward to Event Router (as RoutedEvent)
+		// 5. Forward
 		resp, err := forwarder.Forward(event.ToRoutedEvent(), eventRouterURL)
 		if err != nil {
 			c.JSON(http.StatusBadGateway, gin.H{
@@ -76,7 +68,7 @@ func main() {
 			return
 		}
 
-		// 6. Success response
+		// 6. Success
 		c.JSON(http.StatusOK, gin.H{
 			"status":       "ingested",
 			"event_type":   event.EventType,
