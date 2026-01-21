@@ -1,0 +1,7 @@
+{
+  "critical": "http://localhost:8080/api/internal/events",
+  "high": "http://localhost:8080/api/internal/events",
+  "medium": "http://localhost:8080/api/internal/events",
+  "low": "http://localhost:8080/api/internal/events",
+  "info": "http://localhost:8080/api/internal/events"
+}

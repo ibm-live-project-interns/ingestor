@@ -1,8 +1,13 @@
-module ingestor_core
+module github.com/ibm-live-project-interns/ingestor/ingestor_core
 
-go 1.25.5
+go 1.23.0
 
-require github.com/gin-gonic/gin v1.11.0
+require (
+	github.com/gin-gonic/gin v1.11.0
+	github.com/ibm-live-project-interns/ingestor/shared v0.0.0-00010101000000-000000000000
+)
+
+replace github.com/ibm-live-project-interns/ingestor/shared => ../shared
 
 require (
 	github.com/bytedance/sonic v1.14.0 // indirect

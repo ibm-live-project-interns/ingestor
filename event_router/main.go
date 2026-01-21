@@ -4,23 +4,29 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"os"
 
 	"github.com/gin-gonic/gin"
+	"github.com/ibm-live-project-interns/ingestor/shared/config"
 )
 
 type Event struct {
-	Type    string `json:"type"`
-	Message string `json:"message"`
+	Type       string `json:"type"`
+	Message    string `json:"message"`
+	SourceHost string `json:"source_host,omitempty"`
+	SourceIP   string `json:"source_ip,omitempty"`
+	EventType  string `json:"event_type,omitempty"`
+	Category   string `json:"category,omitempty"`
 }
 
 func loadConfig() map[string]string {
-	data, err := os.ReadFile("config.json")
+	configPath := config.GetEnv("EVENT_ROUTER_CONFIG_PATH", "config.json")
+	data, err := os.ReadFile(configPath)
 	if err != nil {
-		log.Fatalf("Error reading config.json: %v", err)
+		log.Fatalf("Error reading config file %s: %v", configPath, err)
 	}
 
 	config := make(map[string]string)
@@ -37,14 +43,21 @@ func forwardEvent(url string, event Event) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := ioutil.ReadAll(resp.Body)
+	respBody, _ := io.ReadAll(resp.Body)
 
 	return string(respBody), nil
 }
 
 func main() {
+	port := config.GetEnv("EVENT_ROUTER_PORT", "8082")
+
 	router := gin.Default()
 	config := loadConfig()
+
+	// Health check endpoint
+	router.GET("/health", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "healthy", "service": "event-router"})
+	})
 
 	router.POST("/route", func(c *gin.Context) {
 		var evt Event
@@ -69,12 +82,12 @@ func main() {
 		}
 
 		c.JSON(200, gin.H{
-			"status":            "forwarded",
-			"forwarded_to":      destURL,
-			"downstream_reply":  response,
+			"status":           "forwarded",
+			"forwarded_to":     destURL,
+			"downstream_reply": response,
 		})
 	})
 
-	fmt.Println("🌐 Event Router running on :8081")
-	router.Run(":8081")
+	log.Printf("🌐 Event Router running on :%s\n", port)
+	router.Run(":" + port)
 }
