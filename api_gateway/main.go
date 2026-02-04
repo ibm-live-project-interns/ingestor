@@ -207,7 +207,8 @@ type Role struct {
 }
 
 type LoginRequest struct {
-	Username string `json:"username" binding:"required"`
+	Email    string `json:"email"`    // UI sends email
+	Username string `json:"username"` // Allow username as fallback
 	Password string `json:"password" binding:"required"`
 	Role     Role   `json:"role"`
 }
@@ -447,18 +448,32 @@ func login(c *gin.Context) {
 		return
 	}
 
-	// In production, validate against database with hashed passwords
-	// For demo, accept any non-empty credentials
-	if req.Username == "" || req.Password == "" {
+	// Accept either email or username
+	identifier := req.Email
+	if identifier == "" {
+		identifier = req.Username
+	}
+
+	// Validate credentials
+	if identifier == "" || req.Password == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
 
-	// Create or get user
+	// Extract username from email if needed
+	username := identifier
+	email := identifier
+	if !strings.Contains(identifier, "@") {
+		email = identifier + "@example.com"
+	} else {
+		username = strings.Split(identifier, "@")[0]
+	}
+
+	// Create user (in production, validate against database)
 	user := User{
 		ID:       fmt.Sprintf("user-%d", time.Now().UnixNano()),
-		Username: req.Username,
-		Email:    req.Username + "@example.com",
+		Username: username,
+		Email:    email,
 		Role:     req.Role,
 	}
 
@@ -468,12 +483,23 @@ func login(c *gin.Context) {
 		return
 	}
 
+	// Response format matching UI expectations
+	expiresAt := time.Now().Add(time.Duration(config.JWTExpiryHours) * time.Hour)
 	c.JSON(http.StatusOK, gin.H{
-		"token": token,
+		"token":      token,
+		"expires_at": expiresAt.Format(time.RFC3339),
 		"user": gin.H{
-			"username": user.Username,
-			"role":     user.Role,
+			"id":             user.ID,
+			"email":          user.Email,
+			"username":       user.Username,
+			"first_name":     username,
+			"last_name":      "",
+			"role":           user.Role.ID,
+			"is_active":      true,
+			"email_verified": true,
+			"created_at":     time.Now().Format(time.RFC3339),
 		},
+		"permissions": []string{"view-alerts", "acknowledge-alerts", "create-tickets", "view-tickets", "view-devices"},
 	})
 }
 
@@ -512,23 +538,84 @@ func getAlerts(c *gin.Context) {
 	c.JSON(http.StatusOK, alertsStore)
 }
 
+// generateAIAnalysis creates alert-specific AI analysis based on the alert type and severity
+// TODO: Replace with actual AI Core API call to Watson AI for real-time analysis
+func generateAIAnalysis(alert Alert) AIAnalysis {
+	// Map different alert types to specific analysis
+	switch alert.AITitle {
+	case "Interface GigabitEthernet0/1 Down":
+		return AIAnalysis{
+			Summary:        "The network interface has transitioned to a down state while the administrative status remains up.",
+			RootCauses:     []string{"Physical layer failure detected", "Possible cable fault or SFP failure", "Remote device may be powered off"},
+			BusinessImpact: "High - Loss of redundancy to distribution layer.",
+			RecommendedActions: []string{
+				"Verify physical cable connection",
+				"Check remote device status",
+				"Review interface error counters",
+			},
+		}
+	case "High CPU Utilization (85%)":
+		return AIAnalysis{
+			Summary:        "Firewall CPU utilization has exceeded operational thresholds, potentially affecting packet processing performance.",
+			RootCauses:     []string{"High traffic volume detected", "Resource-intensive inspection rules active", "Possible memory leak or process issue"},
+			BusinessImpact: "Medium - Increased latency and potential packet drops during traffic spikes.",
+			RecommendedActions: []string{
+				"Review active sessions and connection count",
+				"Analyze traffic patterns for anomalies",
+				"Consider rule optimization or hardware upgrade",
+				"Monitor memory utilization trends",
+			},
+		}
+	case "BGP Session Flap Detected":
+		return AIAnalysis{
+			Summary:        "Border Gateway Protocol session is experiencing intermittent disconnections, indicating network instability.",
+			RootCauses:     []string{"Routing protocol timer mismatch", "Underlying physical link instability", "Peer configuration changes", "Network congestion affecting keepalives"},
+			BusinessImpact: "Critical - Route instability causing traffic loss and potential service disruption.",
+			RecommendedActions: []string{
+				"Verify BGP timer configuration matches peer",
+				"Check physical layer statistics on peering interface",
+				"Review recent configuration changes on both peers",
+				"Implement route dampening to prevent oscillation",
+			},
+		}
+	case "Configuration Change Detected":
+		return AIAnalysis{
+			Summary:        "Load balancer configuration was modified. Change management process should verify authorization and impact.",
+			RootCauses:     []string{"Administrative configuration update", "Automated policy adjustment", "Software update or patch"},
+			BusinessImpact: "Low - Configuration change verified and approved through change control.",
+			RecommendedActions: []string{
+				"Verify change was authorized via change ticket",
+				"Review configuration diff for unintended changes",
+				"Test application health and performance metrics",
+				"Update configuration documentation",
+			},
+		}
+	default:
+		// Fallback for unknown alert types
+		return AIAnalysis{
+			Summary:        alert.AISummary,
+			RootCauses:     []string{"Analysis in progress - root cause investigation underway"},
+			BusinessImpact: "Impact assessment pending based on alert severity and affected systems.",
+			RecommendedActions: []string{
+				"Review alert details and device status",
+				"Investigate recent changes to affected system",
+				"Monitor for related events",
+			},
+		}
+	}
+}
+
 func getAlertByID(c *gin.Context) {
 	id := c.Param("id")
 	for _, alert := range alertsStore {
 		if alert.ID == id {
+			// Generate alert-specific AI analysis based on alert type
+			aiAnalysis := generateAIAnalysis(alert)
+
 			detail := AlertDetail{
 				Alert:         alert,
 				SimilarEvents: 7,
-				AIAnalysis: AIAnalysis{
-					Summary:        "The network interface has transitioned to a down state while the administrative status remains up.",
-					RootCauses:     []string{"Physical layer failure detected", "Possible cable fault or SFP failure", "Remote device may be powered off"},
-					BusinessImpact: "High - Loss of redundancy to distribution layer.",
-					RecommendedActions: []string{
-						"Verify physical cable connection",
-						"Check remote device status",
-						"Review interface error counters",
-					},
-				},
+				AIAnalysis:    aiAnalysis,
 				RawData: `SNMP-v2-MIB::sysUpTime.0 = Timeticks: (123456789)
 IF-MIB::ifOperStatus.24 = INTEGER: down(2)
 IF-MIB::ifAdminStatus.24 = INTEGER: up(1)`,
@@ -566,7 +653,11 @@ func getAlertsSummary(c *gin.Context) {
 func getSeverityDistribution(c *gin.Context) {
 	counts := make(map[string]int)
 	for _, alert := range alertsStore {
-		sev := strings.Title(alert.Severity)
+		// Capitalize first letter (replacing deprecated strings.Title)
+		sev := alert.Severity
+		if len(sev) > 0 {
+			sev = strings.ToUpper(sev[:1]) + sev[1:]
+		}
 		counts[sev]++
 	}
 
@@ -584,6 +675,104 @@ func getAlertsOverTime(c *gin.Context) {
 		{"group": "Major", "date": "2024-01-01T00:00:00Z", "value": 10},
 		{"group": "Major", "date": "2024-01-01T04:00:00Z", "value": 15},
 	})
+}
+
+// Device model for list endpoint
+type DeviceListItem struct {
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	IP           string `json:"ip"`
+	Type         string `json:"type"`
+	Location     string `json:"location"`
+	Status       string `json:"status"`
+	HealthScore  int    `json:"health_score"`
+	RecentAlerts int    `json:"recent_alerts"`
+	Uptime       string `json:"uptime"`
+	LastSeen     string `json:"last_seen"`
+	Model        string `json:"model"`
+	Vendor       string `json:"vendor"`
+}
+
+// In-memory device store
+var devicesStore = []DeviceListItem{
+	{
+		ID:           "dev-001",
+		Name:         "Core-SW-01",
+		IP:           "192.168.1.10",
+		Type:         "switch",
+		Location:     "Data Center 1",
+		Status:       "online",
+		HealthScore:  98,
+		RecentAlerts: 1,
+		Uptime:       "45d 12h",
+		LastSeen:     "2 min ago",
+		Model:        "Catalyst 9300",
+		Vendor:       "Cisco",
+	},
+	{
+		ID:           "dev-002",
+		Name:         "FW-DMZ-03",
+		IP:           "172.16.3.1",
+		Type:         "firewall",
+		Location:     "DMZ",
+		Status:       "warning",
+		HealthScore:  72,
+		RecentAlerts: 1,
+		Uptime:       "12d 8h",
+		LastSeen:     "1 min ago",
+		Model:        "PA-5220",
+		Vendor:       "Palo Alto",
+	},
+	{
+		ID:           "dev-003",
+		Name:         "RTR-EDGE-01",
+		IP:           "10.0.0.1",
+		Type:         "router",
+		Location:     "Edge",
+		Status:       "online",
+		HealthScore:  95,
+		RecentAlerts: 0,
+		Uptime:       "120d 3h",
+		LastSeen:     "30 sec ago",
+		Model:        "ASR 9000",
+		Vendor:       "Cisco",
+	},
+}
+
+func getDevices(c *gin.Context) {
+	c.JSON(http.StatusOK, devicesStore)
+}
+
+func getDeviceByID(c *gin.Context) {
+	id := c.Param("id")
+	for _, device := range devicesStore {
+		if device.ID == id {
+			// Return extended device details
+			c.JSON(http.StatusOK, gin.H{
+				"id":            device.ID,
+				"name":          device.Name,
+				"ip":            device.IP,
+				"type":          device.Type,
+				"location":      device.Location,
+				"status":        device.Status,
+				"health_score":  device.HealthScore,
+				"recent_alerts": device.RecentAlerts,
+				"uptime":        device.Uptime,
+				"last_seen":     device.LastSeen,
+				"model":         device.Model,
+				"vendor":        device.Vendor,
+				"firmware":      "17.6.4",
+				"serial_number": "FCW2148L0PQ",
+				"mac_address":   "00:1A:2B:3C:4D:5E",
+				"cpu_usage":     45,
+				"memory_usage":  62,
+				"network_in":    850,
+				"network_out":   420,
+			})
+			return
+		}
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": "Device not found"})
 }
 
 func getNoisyDevices(c *gin.Context) {
@@ -972,6 +1161,8 @@ func main() {
 			protected.GET("/trends/kpi", getTrendsKPI)
 
 			// Devices
+			protected.GET("/devices", getDevices)
+			protected.GET("/devices/:id", getDeviceByID)
 			protected.GET("/devices/noisy", getNoisyDevices)
 
 			// AI

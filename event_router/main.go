@@ -27,7 +27,7 @@ func loadConfig() map[string]string {
 	return config
 }
 
-func forwardEvent(url string, event Event) (string, error) {
+func forwardEvent(url string, event models.RoutedEvent) (string, error) {
 	body, _ := json.Marshal(event)
 
 	resp, err := http.Post(url, "application/json", bytes.NewBuffer(body))

@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/ibm-live-project-interns/ingestor/shared/models"
 )
 
 var kafkaProducer *kafka.Producer
@@ -28,7 +29,7 @@ func initKafka() {
 	log.Println("✅ Kafka producer ready")
 }
 
-func publishToKafka(event Event) error {
+func publishToKafka(event models.RoutedEvent) error {
 	topic := "ingestion-events"
 	value, _ := json.Marshal(event)
 

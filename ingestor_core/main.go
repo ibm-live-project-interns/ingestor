@@ -7,11 +7,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/ibm-live-project-interns/ingestor/shared/config"
 
-	"ingestor/ingestor_core/normalizer"
-	"ingestor/ingestor_core/validator"
-	"ingestor/ingestor_core/enricher"
-	"ingestor/ingestor_core/forwarder"
-	"ingestor/ingestor_core/health"
+	"github.com/ibm-live-project-interns/ingestor/ingestor_core/normalizer"
+	"github.com/ibm-live-project-interns/ingestor/ingestor_core/validator"
+	"github.com/ibm-live-project-interns/ingestor/ingestor_core/enricher"
+	"github.com/ibm-live-project-interns/ingestor/ingestor_core/forwarder"
+	"github.com/ibm-live-project-interns/ingestor/ingestor_core/health"
 )
 
 func main() {

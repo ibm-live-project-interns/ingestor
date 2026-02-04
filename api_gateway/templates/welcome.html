@@ -1,0 +1,22 @@
+{{/* Welcome Template - Uses base.html for shared styles */}}
+{{template "base" .}}
+
+{{define "content"}}
+<h2>Welcome, {{.Username}}</h2>
+<p>Your account has been verified and is now active.</p>
+<a href="{{.ActionURL}}" class="button">Go to dashboard</a>
+<div class="divider"></div>
+<p style="font-size: 12px; color: #6f6f6f; margin-bottom: 16px;">With {{if .AppName}}{{.AppName}}{{else}}NOC Dashboard{{end}} you can:</p>
+<div class="features">
+    {{if .Custom.Features}}
+        {{range .Custom.Features}}
+        <div class="feature">{{.}}</div>
+        {{end}}
+    {{else}}
+        <div class="feature">Monitor network events in real-time</div>
+        <div class="feature">Get AI-powered analysis with IBM watsonx</div>
+        <div class="feature">Create and manage support tickets</div>
+        <div class="feature">Access role-based dashboards</div>
+    {{end}}
+</div>
+{{end}}

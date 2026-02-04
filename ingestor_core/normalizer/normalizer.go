@@ -9,9 +9,12 @@ import (
 // Normalize converts raw incoming JSON into a normalized Event
 func Normalize(raw map[string]interface{}) models.Event {
 	event := models.Event{
-		EventType: "unknown",
-		Severity:  "INFO",
-		Timestamp: time.Now(),
+		EventType:      "unknown",
+		Severity:       "info",
+		Category:       "general",
+		SourceIP:       "0.0.0.0",
+		Message:        "",
+		EventTimestamp: time.Now(),
 	}
 
 	// event_type
@@ -24,6 +27,16 @@ func Normalize(raw map[string]interface{}) models.Event {
 		event.SourceHost = v
 	}
 
+	// source_ip
+	if v, ok := raw["source_ip"].(string); ok && v != "" {
+		event.SourceIP = v
+	}
+
+	// category
+	if v, ok := raw["category"].(string); ok && v != "" {
+		event.Category = v
+	}
+
 	// message
 	if v, ok := raw["message"].(string); ok && v != "" {
 		event.Message = v
@@ -34,10 +47,15 @@ func Normalize(raw map[string]interface{}) models.Event {
 		event.Severity = v
 	}
 
+	// raw_payload
+	if v, ok := raw["raw_payload"].(string); ok {
+		event.RawPayload = v
+	}
+
 	// timestamp (RFC3339 expected)
 	if v, ok := raw["timestamp"].(string); ok {
 		if ts, err := time.Parse(time.RFC3339, v); err == nil {
-			event.Timestamp = ts
+			event.EventTimestamp = ts
 		}
 	}
 
