@@ -1,0 +1,26 @@
+{{define "content"}}
+<h2>Alert Notification</h2>
+<p>Hi {{.Username}},</p>
+<p>A new <strong>{{if .Custom.Severity}}{{.Custom.Severity}}{{else}}unknown{{end}}</strong> severity alert has been detected in your NOC Dashboard.</p>
+
+<div style="background: #f4f4f4; padding: 16px; margin: 16px 0; border-left: 4px solid {{if eq (index .Custom "SeverityColor") ""}}#0f62fe{{else}}{{.Custom.SeverityColor}}{{end}};">
+    <p style="margin: 0 0 8px 0; font-weight: 600; font-size: 16px; color: #161616;">{{if .Custom.Title}}{{.Custom.Title}}{{else}}New Alert{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Device:</strong> {{if .Custom.Device}}{{.Custom.Device}}{{else}}Unknown{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Category:</strong> {{if .Custom.Category}}{{.Custom.Category}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0; font-size: 14px; color: #525252;"><strong>Source IP:</strong> {{if .Custom.SourceIP}}{{.Custom.SourceIP}}{{else}}N/A{{end}}</p>
+</div>
+
+{{if .Custom.AISummary}}
+<div style="margin: 16px 0;">
+    <p style="font-size: 12px; font-weight: 600; color: #6f6f6f; text-transform: uppercase; letter-spacing: 0.32px; margin: 0 0 8px 0;">AI Analysis</p>
+    <p style="font-size: 14px; color: #525252; margin: 0;">{{.Custom.AISummary}}</p>
+</div>
+{{end}}
+
+<a href="{{.ActionURL}}" class="button">View Alert Details</a>
+
+<div class="notice">
+    <p>This alert was generated at {{if .Custom.Timestamp}}{{.Custom.Timestamp}}{{else}}N/A{{end}} UTC.</p>
+    <p>You can manage your notification preferences in <a href="{{.DashboardURL}}/settings" style="color: #0f62fe;">Settings</a>.</p>
+</div>
+{{end}}

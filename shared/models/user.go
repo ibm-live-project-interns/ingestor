@@ -45,6 +45,12 @@ type User struct {
 	// Password Reset
 	ResetToken    string     `gorm:"size:100;index" json:"-"`
 	ResetTokenExp *time.Time `json:"-"`
+
+	// Notification Preferences
+	EmailAlerts       bool `gorm:"default:true" json:"email_alerts"`
+	PushNotifications bool `gorm:"default:true" json:"push_notifications"`
+	SoundEnabled      bool `gorm:"default:false" json:"sound_enabled"`
+	CriticalOnly      bool `gorm:"default:false" json:"critical_only"`
 }
 
 // TableName returns the table name for User

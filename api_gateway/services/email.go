@@ -133,6 +133,7 @@ func loadTemplates(dir string) (map[string]*template.Template, error) {
 		"verify-email.html",
 		"reset-password.html",
 		"welcome.html",
+		"alert-notification.html",
 	}
 
 	for _, filename := range templateFiles {
@@ -219,6 +220,51 @@ func (e *EmailService) sendTemplate(toEmail, subject, templateName string, data 
 	}
 
 	return e.send(toEmail, subject, body.String())
+}
+
+// AlertEmailData holds the details needed for an alert notification email
+type AlertEmailData struct {
+	AlertID   string
+	Title     string
+	Severity  string
+	Device    string
+	SourceIP  string
+	Category  string
+	AISummary string
+	Timestamp string
+}
+
+// SendAlertNotification sends an alert notification email to the given user
+func (e *EmailService) SendAlertNotification(toEmail, username string, alert AlertEmailData) error {
+	severityColors := map[string]string{
+		"critical": "#da1e28",
+		"high":     "#ff832b",
+		"major":    "#ff832b",
+		"medium":   "#f1c21b",
+		"low":      "#24a148",
+		"info":     "#0f62fe",
+	}
+	color := severityColors[alert.Severity]
+	if color == "" {
+		color = "#0f62fe"
+	}
+
+	data := e.baseEmailData()
+	data.Username = username
+	data.ActionURL = fmt.Sprintf("%s/alerts/%s", e.frontendURL, alert.AlertID)
+	data.Custom = map[string]interface{}{
+		"Title":         alert.Title,
+		"Severity":      alert.Severity,
+		"SeverityColor": color,
+		"Device":        alert.Device,
+		"SourceIP":      alert.SourceIP,
+		"Category":      alert.Category,
+		"AISummary":     alert.AISummary,
+		"Timestamp":     alert.Timestamp,
+	}
+
+	subject := fmt.Sprintf("[%s] %s – %s", alert.Severity, alert.Device, alert.Title)
+	return e.sendTemplate(toEmail, subject, "alert-notification", data)
 }
 
 // send is the internal method to send emails

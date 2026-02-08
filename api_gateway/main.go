@@ -164,6 +164,10 @@ func main() {
 			protected.GET("/ai/insights", handlers.GetAIInsights)
 			protected.GET("/ai/impact-over-time", handlers.GetAIImpactOverTime)
 
+			// User Settings
+			protected.GET("/settings/notifications", handlers.GetNotificationPreferences)
+			protected.PUT("/settings/notifications", handlers.UpdateNotificationPreferences)
+
 			// Reports
 			protected.GET("/reports/export", handlers.ExportReport)
 

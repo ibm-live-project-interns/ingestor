@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"api_gateway/services"
 	"github.com/ibm-live-project-interns/ingestor/shared/database"
 	"github.com/ibm-live-project-interns/ingestor/shared/errors"
 	"github.com/ibm-live-project-interns/ingestor/shared/logger"
@@ -134,6 +135,9 @@ func IngestEvent(c *gin.Context) {
 	}
 
 	logger.Info("Alert %s created from ingest event: severity=%s category=%s device=%s has_ai=%v", alertID, alert.Severity, req.Category, req.SourceHost, req.AIAnalysis != nil)
+
+	// Send email notifications asynchronously
+	go sendAlertEmailNotifications(alert)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"message":  "Event ingested successfully",
@@ -663,5 +667,65 @@ func ExportReport(c *gin.Context) {
 	default:
 		apiErr := errors.NewBadRequest("Invalid report type. Use 'alerts' or 'tickets'")
 		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
+	}
+}
+
+// sendAlertEmailNotifications sends email notifications to users who have email alerts enabled
+func sendAlertEmailNotifications(alert models.Alert) {
+	if services.Email == nil {
+		return
+	}
+
+	db := database.Get()
+	if db == nil {
+		return
+	}
+
+	// Find users with email alerts enabled
+	var users []models.User
+	query := db.Where("email_alerts = ? AND is_active = ?", true, true)
+
+	// If critical_only, only match critical/high alerts
+	// We send to all email_alerts users, but skip users who have critical_only=true
+	// unless the alert is critical or high severity
+	if err := query.Find(&users).Error; err != nil {
+		logger.Error("Failed to query users for alert notifications: %v", err)
+		return
+	}
+
+	isCriticalOrHigh := alert.Severity == "critical" || alert.Severity == "high"
+
+	emailData := services.AlertEmailData{
+		AlertID:   alert.ID,
+		Title:     alert.Title,
+		Severity:  alert.Severity,
+		Device:    alert.Device,
+		SourceIP:  alert.SourceIP,
+		Category:  alert.Category,
+		AISummary: alert.AIAnalysisSummary,
+		Timestamp: alert.Timestamp.UTC().Format("2006-01-02 15:04:05"),
+	}
+
+	sent := 0
+	for _, user := range users {
+		// Skip users with critical_only if alert isn't critical/high
+		if user.CriticalOnly && !isCriticalOrHigh {
+			continue
+		}
+
+		username := user.Username
+		if user.FirstName != "" {
+			username = user.FirstName
+		}
+
+		if err := services.Email.SendAlertNotification(user.Email, username, emailData); err != nil {
+			logger.Error("Failed to send alert notification to %s: %v", user.Email, err)
+		} else {
+			sent++
+		}
+	}
+
+	if sent > 0 {
+		logger.Info("Sent alert notification emails for %s to %d users", alert.ID, sent)
 	}
 }
