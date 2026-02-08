@@ -32,6 +32,9 @@ func getDemoTickets() []models.Ticket {
 	alertID1 := "ALT-001"
 	alertID3 := "ALT-003"
 	alertID5 := "ALT-005"
+	deviceID1 := "router-core-01"
+	deviceID2 := "server-app-01"
+	deviceID4 := "db-prod-01"
 	return []models.Ticket{
 		{
 			ID:          "TKT-001",
@@ -43,7 +46,7 @@ func getDemoTickets() []models.Ticket {
 			Assignee:    "John Smith",
 			Reporter:    "System",
 			AlertID:     &alertID1,
-			DeviceID:    "router-core-01",
+			DeviceID:    &deviceID1,
 			CreatedAt:   now.Add(-2 * time.Hour),
 			UpdatedAt:   now.Add(-30 * time.Minute),
 		},
@@ -57,7 +60,7 @@ func getDemoTickets() []models.Ticket {
 			Assignee:    "Jane Doe",
 			Reporter:    "Admin",
 			AlertID:     &alertID3,
-			DeviceID:    "server-app-01",
+			DeviceID:    &deviceID2,
 			CreatedAt:   now.Add(-5 * time.Hour),
 			UpdatedAt:   now.Add(-1 * time.Hour),
 		},
@@ -83,7 +86,7 @@ func getDemoTickets() []models.Ticket {
 			Assignee:    "DBA Team",
 			Reporter:    "Monitoring System",
 			AlertID:     &alertID5,
-			DeviceID:    "db-prod-01",
+			DeviceID:    &deviceID4,
 			CreatedAt:   now.Add(-1 * time.Hour),
 			UpdatedAt:   now.Add(-15 * time.Minute),
 		},
@@ -217,6 +220,10 @@ func CreateTicket(c *gin.Context) {
 	if repo == nil {
 		// Demo mode - return a demo response
 		now := time.Now()
+		var demoDeviceID *string
+		if req.DeviceID != "" {
+			demoDeviceID = &req.DeviceID
+		}
 		ticket := models.Ticket{
 			ID:          fmt.Sprintf("TKT-DEMO-%d", now.Unix()),
 			Title:       req.Title,
@@ -227,7 +234,7 @@ func CreateTicket(c *gin.Context) {
 			Assignee:    req.Assignee,
 			Reporter:    "demo-user",
 			AlertID:     req.AlertID,
-			DeviceID:    req.DeviceID,
+			DeviceID:    demoDeviceID,
 			Tags:        strings.Join(req.Tags, ","),
 			CreatedAt:   now,
 			UpdatedAt:   now,
@@ -255,6 +262,12 @@ func CreateTicket(c *gin.Context) {
 		return
 	}
 
+	// Convert empty device_id to nil to avoid FK constraint violation
+	var deviceID *string
+	if req.DeviceID != "" {
+		deviceID = &req.DeviceID
+	}
+
 	ticket := models.Ticket{
 		ID:          ticketID,
 		Title:       req.Title,
@@ -265,7 +278,7 @@ func CreateTicket(c *gin.Context) {
 		Assignee:    req.Assignee,
 		Reporter:    reporterStr,
 		AlertID:     req.AlertID,
-		DeviceID:    req.DeviceID,
+		DeviceID:    deviceID,
 		Tags:        strings.Join(req.Tags, ","),
 	}
 
@@ -351,6 +364,9 @@ func UpdateTicket(c *gin.Context) {
 	}
 	if req.Assignee != "" {
 		updates["assignee"] = req.Assignee
+	}
+	if req.AlertID != nil {
+		updates["alert_id"] = *req.AlertID
 	}
 	if req.Tags != nil {
 		updates["tags"] = strings.Join(req.Tags, ",")

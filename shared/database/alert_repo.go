@@ -115,6 +115,21 @@ func (r *AlertRepository) Update(alert *models.Alert) error {
 	return nil
 }
 
+// UpdateFields updates specific fields on an alert by ID
+func (r *AlertRepository) UpdateFields(id string, updates map[string]interface{}) error {
+	updates["updated_at"] = time.Now().UTC()
+	result := r.db.Model(&models.Alert{}).Where("id = ?", id).Updates(updates)
+	if result.Error != nil {
+		logger.Error("Failed to update alert fields %s: %v", id, result.Error)
+		return fmt.Errorf("failed to update alert fields: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("alert not found: %s", id)
+	}
+	logger.Info("Alert %s fields updated", id)
+	return nil
+}
+
 // UpdateStatus updates only the status of an alert
 func (r *AlertRepository) UpdateStatus(id, status, byUser string) error {
 	updates := map[string]interface{}{
@@ -125,8 +140,8 @@ func (r *AlertRepository) UpdateStatus(id, status, byUser string) error {
 	switch status {
 	case models.AlertStatusAcknowledged:
 		now := time.Now().UTC()
-		updates["acked_at"] = &now
-		updates["acked_by"] = byUser
+		updates["acknowledged_at"] = &now
+		updates["acknowledged_by"] = byUser
 	case models.AlertStatusResolved:
 		now := time.Now().UTC()
 		updates["resolved_at"] = &now

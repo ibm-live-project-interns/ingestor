@@ -12,6 +12,7 @@ import (
 
 	"api_gateway/services"
 
+	"github.com/ibm-live-project-interns/ingestor/shared/config"
 	"github.com/ibm-live-project-interns/ingestor/shared/database"
 	"github.com/ibm-live-project-interns/ingestor/shared/logger"
 	"github.com/ibm-live-project-interns/ingestor/shared/models"
@@ -465,6 +466,57 @@ func generateOAuthState() string {
 	return hex.EncodeToString(bytes)
 }
 
+// validateRedirectURL validates a redirect URL against allowed frontend origins.
+// Prevents open redirect attacks by only allowing redirects to known frontend URLs.
+func validateRedirectURL(redirectURL string) string {
+	frontendURL := config.GetEnv("FRONTEND_URL", "http://localhost:5173")
+	defaultRedirect := frontendURL + "/dashboard"
+
+	if redirectURL == "" {
+		return defaultRedirect
+	}
+
+	// Parse the provided redirect URL
+	parsed, err := url.Parse(redirectURL)
+	if err != nil {
+		logger.Warn("Invalid redirect URL rejected: %s", redirectURL)
+		return defaultRedirect
+	}
+
+	// Allow relative paths (no scheme/host)
+	if parsed.Scheme == "" && parsed.Host == "" && strings.HasPrefix(redirectURL, "/") {
+		return frontendURL + redirectURL
+	}
+
+	// Build allowed origins list from FRONTEND_URL and CORS origins
+	allowedOrigins := []string{frontendURL}
+	corsOrigins := config.GetEnv("CORS_ALLOWED_ORIGINS", "")
+	if corsOrigins != "" {
+		for _, origin := range strings.Split(corsOrigins, ",") {
+			origin = strings.TrimSpace(origin)
+			if origin != "" {
+				allowedOrigins = append(allowedOrigins, origin)
+			}
+		}
+	}
+
+	// Check if the redirect URL matches an allowed origin
+	redirectOrigin := parsed.Scheme + "://" + parsed.Host
+	for _, allowed := range allowedOrigins {
+		allowedParsed, err := url.Parse(strings.TrimSpace(allowed))
+		if err != nil {
+			continue
+		}
+		allowedOrigin := allowedParsed.Scheme + "://" + allowedParsed.Host
+		if redirectOrigin == allowedOrigin {
+			return redirectURL
+		}
+	}
+
+	logger.Warn("Redirect URL rejected (not in allowed origins): %s", redirectURL)
+	return defaultRedirect
+}
+
 // GoogleLogin initiates Google OAuth login
 func GoogleLogin(c *gin.Context) {
 	if services.Google == nil || !services.Google.IsEnabled() {
@@ -472,11 +524,9 @@ func GoogleLogin(c *gin.Context) {
 		return
 	}
 
-	// Get redirect URL from query param
+	// Get redirect URL from query param, validated against allowed origins
 	redirectURL := c.Query("redirect")
-	if redirectURL == "" {
-		redirectURL = "http://localhost:5173/dashboard"
-	}
+	redirectURL = validateRedirectURL(redirectURL)
 
 	// Generate state with redirect URL encoded
 	state := generateOAuthState() + ":" + url.QueryEscape(redirectURL)
@@ -508,18 +558,16 @@ func GoogleCallback(c *gin.Context) {
 		return
 	}
 
-	// Parse state to get redirect URL
+	// Parse state to get redirect URL, then validate against allowed origins
 	state := c.Query("state")
-	var frontendRedirect string
+	var rawRedirect string
 	if parts := strings.SplitN(state, ":", 2); len(parts) == 2 {
 		decoded, err := url.QueryUnescape(parts[1])
 		if err == nil {
-			frontendRedirect = decoded
+			rawRedirect = decoded
 		}
 	}
-	if frontendRedirect == "" {
-		frontendRedirect = "http://localhost:5173/dashboard"
-	}
+	frontendRedirect := validateRedirectURL(rawRedirect)
 
 	// Exchange code for token
 	token, err := services.Google.ExchangeCode(c.Request.Context(), code)

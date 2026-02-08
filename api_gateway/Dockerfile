@@ -18,6 +18,7 @@ FROM alpine:latest
 RUN apk --no-cache add ca-certificates
 WORKDIR /root/
 COPY --from=builder /app/ingestor/api_gateway/api_gateway .
+COPY --from=builder /app/ingestor/api_gateway/templates ./templates/
 
 EXPOSE 8080
 CMD ["./api_gateway"]

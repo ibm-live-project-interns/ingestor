@@ -3,15 +3,9 @@ package validator
 import (
 	"fmt"
 
+	"github.com/ibm-live-project-interns/ingestor/shared/constants"
 	"github.com/ibm-live-project-interns/ingestor/shared/models"
 )
-
-var allowedSeverities = map[string]bool{
-	"INFO":     true,
-	"WARN":     true,
-	"ERROR":    true,
-	"CRITICAL": true,
-}
 
 func ValidateEvent(event models.Event) error {
 	if event.EventType == "" {
@@ -26,7 +20,7 @@ func ValidateEvent(event models.Event) error {
 	if event.Severity == "" {
 		return fmt.Errorf("validation_error: severity is required")
 	}
-	if !allowedSeverities[event.Severity] {
+	if !constants.IsValidSeverity(event.Severity) {
 		return fmt.Errorf("validation_error: invalid severity '%s'", event.Severity)
 	}
 	return nil

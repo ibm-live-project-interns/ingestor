@@ -112,6 +112,12 @@ func (rl *MemoryRateLimiter) Allow(key string) (bool, int, time.Duration) {
 // Middleware returns a Gin middleware for rate limiting
 func (rl *MemoryRateLimiter) Middleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// Skip rate limiting for CORS preflight requests
+		if c.Request.Method == "OPTIONS" {
+			c.Next()
+			return
+		}
+
 		key := rl.config.KeyFunc(c)
 		allowed, remaining, resetIn := rl.Allow(key)
 

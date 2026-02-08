@@ -22,13 +22,18 @@ func loadConfig() map[string]string {
 		log.Fatalf("Error reading config file %s: %v", configPath, err)
 	}
 
-	config := make(map[string]string)
-	json.Unmarshal(data, &config)
-	return config
+	cfg := make(map[string]string)
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		log.Fatalf("Error parsing config file %s: %v", configPath, err)
+	}
+	return cfg
 }
 
 func forwardEvent(url string, event models.RoutedEvent) (string, error) {
-	body, _ := json.Marshal(event)
+	body, err := json.Marshal(event)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal event: %w", err)
+	}
 
 	resp, err := http.Post(url, "application/json", bytes.NewBuffer(body))
 	if err != nil {
@@ -36,7 +41,14 @@ func forwardEvent(url string, event models.RoutedEvent) (string, error) {
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read response body: %w", err)
+	}
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return "", fmt.Errorf("downstream returned status %d: %s", resp.StatusCode, string(respBody))
+	}
 
 	return string(respBody), nil
 }
@@ -45,8 +57,13 @@ func main() {
 	port := config.GetEnv("EVENT_ROUTER_PORT", "8082")
 
 	router := gin.Default()
-	config := loadConfig()
-		initKafka()
+	routeConfig := loadConfig()
+	log.Printf("[event-router] Loaded %d routing rules", len(routeConfig))
+	for severity, url := range routeConfig {
+		log.Printf("[event-router] Route: severity=%s → %s", severity, url)
+	}
+
+	initKafka()
 	defer kafkaProducer.Close()
 
 	// Health check endpoint
@@ -58,28 +75,43 @@ func main() {
 		var evt models.RoutedEvent
 
 		if err := c.ShouldBindJSON(&evt); err != nil {
+			log.Printf("[event-router] ERROR: invalid event payload: %v", err)
 			c.JSON(400, gin.H{"error": err.Error()})
 			return
 		}
-			if err := publishToKafka(evt); err != nil {
-		c.JSON(500, gin.H{"error": "failed to publish event to kafka"})
-		return
-	}
 
-		destURL, ok := config[evt.EventType]
+		log.Printf("[event-router] Received event: type=%s severity=%s source=%s", evt.EventType, evt.Type, evt.SourceHost)
+
+		if err := publishToKafka(evt); err != nil {
+			log.Printf("[event-router] ERROR: failed to publish to Kafka: %v", err)
+			c.JSON(500, gin.H{"error": "failed to publish event to kafka"})
+			return
+		}
+
+		if evt.Type == "" {
+			log.Printf("[event-router] WARN: event has empty severity (Type field), cannot route")
+			c.JSON(400, gin.H{"error": "event severity (type) is required for routing"})
+			return
+		}
+
+		destURL, ok := routeConfig[evt.Type]
 		if !ok {
+			log.Printf("[event-router] WARN: no route for severity=%s, available routes: %v", evt.Type, routeConfig)
 			c.JSON(400, gin.H{
-				"error": fmt.Sprintf("No route configured for event type: %s", evt.Type),
+				"error": fmt.Sprintf("No route configured for severity: %s", evt.Type),
 			})
 			return
 		}
 
+		log.Printf("[event-router] Forwarding event to %s (severity=%s)", destURL, evt.Type)
 		response, err := forwardEvent(destURL, evt)
 		if err != nil {
+			log.Printf("[event-router] ERROR: forwarding failed: %v", err)
 			c.JSON(500, gin.H{"error": err.Error()})
 			return
 		}
 
+		log.Printf("[event-router] Successfully forwarded event (severity=%s) to %s", evt.Type, destURL)
 		c.JSON(200, gin.H{
 			"status":           "forwarded",
 			"forwarded_to":     destURL,

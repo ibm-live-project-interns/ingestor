@@ -102,15 +102,29 @@ func IngestEvent(c *gin.Context) {
 
 	// Add AI analysis if present
 	if req.AIAnalysis != nil {
-		if summary, ok := req.AIAnalysis["explanation"].(string); ok {
+		logger.Info("Alert %s has AI analysis data, extracting fields", alertID)
+		if summary, ok := req.AIAnalysis["explanation"].(string); ok && summary != "" {
 			alert.AIAnalysisSummary = summary
 		}
-		if recommendation, ok := req.AIAnalysis["recommended_action"].(string); ok {
+		if rootCause, ok := req.AIAnalysis["root_cause"].(string); ok && rootCause != "" {
+			alert.AIAnalysisRootCause = rootCause
+		}
+		if impact, ok := req.AIAnalysis["impact"].(string); ok && impact != "" {
+			alert.AIAnalysisImpact = impact
+		}
+		if recommendation, ok := req.AIAnalysis["recommended_action"].(string); ok && recommendation != "" {
 			alert.AIAnalysisRecommendation = recommendation
 		}
 		if confidence, ok := req.AIAnalysis["confidence"].(float64); ok {
 			alert.AIConfidence = confidence
 		}
+		// Also try severity from AI analysis to override if present
+		if aiSeverity, ok := req.AIAnalysis["severity"].(string); ok && aiSeverity != "" && aiSeverity != "unknown" {
+			alert.Severity = aiSeverity
+			logger.Info("Alert %s severity overridden by AI to: %s", alertID, aiSeverity)
+		}
+	} else {
+		logger.Debug("Alert %s has no AI analysis data", alertID)
 	}
 
 	if err := repo.Create(&alert); err != nil {
@@ -119,7 +133,7 @@ func IngestEvent(c *gin.Context) {
 		return
 	}
 
-	logger.Info("Alert %s created from ingest event: %s", alertID, req.Category)
+	logger.Info("Alert %s created from ingest event: severity=%s category=%s device=%s has_ai=%v", alertID, alert.Severity, req.Category, req.SourceHost, req.AIAnalysis != nil)
 
 	c.JSON(http.StatusCreated, gin.H{
 		"message":  "Event ingested successfully",
@@ -265,11 +279,11 @@ func getDemoDevices() []Device {
 	}
 }
 
-// GetDevices returns all devices with optional filtering
+// GetDevices returns all devices with optional filtering - queries real DB with demo fallback
 func GetDevices(c *gin.Context) {
 	db := database.Get()
 	if db == nil {
-		// Demo mode - return demo devices
+		logger.Warn("No database connection, returning demo devices")
 		devices := getDemoDevices()
 		c.JSON(http.StatusOK, gin.H{
 			"devices": devices,
@@ -278,36 +292,89 @@ func GetDevices(c *gin.Context) {
 		return
 	}
 
-	// In real implementation, query devices from database
-	// For now, return demo devices as devices table may not exist
-	devices := getDemoDevices()
-
-	// Apply filters if provided
-	status := c.Query("status")
-	deviceType := c.Query("type")
-
-	filtered := make([]Device, 0)
-	for _, d := range devices {
-		if status != "" && d.Status != status {
-			continue
-		}
-		if deviceType != "" && d.Type != deviceType {
-			continue
-		}
-		filtered = append(filtered, d)
+	// Query real devices from database
+	var dbDevices []struct {
+		ID           string     `json:"id"`
+		Name         string     `json:"name"`
+		IP           string     `json:"ip"`
+		Type         string     `json:"type"`
+		Location     string     `json:"location"`
+		Status       string     `json:"status"`
+		HealthScore  int        `json:"health_score"`
+		RecentAlerts int        `json:"recent_alerts"`
+		Uptime       string     `json:"uptime"`
+		Model        string     `json:"model"`
+		Vendor       string     `json:"vendor"`
+		LastSeen     *time.Time `json:"last_seen"`
+		CPUUsage     float64    `json:"cpu_usage"`
+		MemoryUsage  float64    `json:"memory_usage"`
+		NetworkIn    int64      `json:"network_in"`
+		NetworkOut   int64      `json:"network_out"`
 	}
 
+	query := db.Table("devices").Order("name ASC")
+
+	// Apply filters
+	if status := c.Query("status"); status != "" {
+		query = query.Where("status = ?", status)
+	}
+	if deviceType := c.Query("type"); deviceType != "" {
+		query = query.Where("type = ?", deviceType)
+	}
+
+	if err := query.Find(&dbDevices).Error; err != nil {
+		logger.Error("Failed to query devices from DB: %v, falling back to demo data", err)
+		devices := getDemoDevices()
+		c.JSON(http.StatusOK, gin.H{
+			"devices": devices,
+			"total":   len(devices),
+		})
+		return
+	}
+
+	logger.Info("Returning %d devices from database", len(dbDevices))
 	c.JSON(http.StatusOK, gin.H{
-		"devices": filtered,
-		"total":   len(filtered),
+		"devices": dbDevices,
+		"total":   len(dbDevices),
 	})
 }
 
-// GetDeviceByID returns a single device by ID
+// GetDeviceByID returns a single device by ID - queries real DB with demo fallback
 func GetDeviceByID(c *gin.Context) {
 	deviceID := c.Param("id")
 
-	// For demo mode, find in demo devices
+	db := database.Get()
+	if db != nil {
+		var device struct {
+			ID           string     `json:"id"`
+			Name         string     `json:"name"`
+			IP           string     `json:"ip"`
+			Type         string     `json:"type"`
+			Location     string     `json:"location"`
+			Status       string     `json:"status"`
+			HealthScore  int        `json:"health_score"`
+			RecentAlerts int        `json:"recent_alerts"`
+			Uptime       string     `json:"uptime"`
+			Model        string     `json:"model"`
+			Vendor       string     `json:"vendor"`
+			Firmware     string     `json:"firmware"`
+			SerialNumber string     `json:"serial_number"`
+			MACAddress   string     `json:"mac_address"`
+			CPUUsage     float64    `json:"cpu_usage"`
+			MemoryUsage  float64    `json:"memory_usage"`
+			NetworkIn    int64      `json:"network_in"`
+			NetworkOut   int64      `json:"network_out"`
+			LastSeen     *time.Time `json:"last_seen"`
+		}
+		if err := db.Table("devices").Where("id = ?", deviceID).First(&device).Error; err == nil {
+			logger.Info("Returning device %s from database", deviceID)
+			c.JSON(http.StatusOK, device)
+			return
+		}
+		logger.Warn("Device %s not found in database, checking demo data", deviceID)
+	}
+
+	// Fallback to demo devices
 	for _, d := range getDemoDevices() {
 		if d.ID == deviceID {
 			c.JSON(http.StatusOK, d)
@@ -441,7 +508,7 @@ func GetAIMetrics(c *gin.Context) {
 	db.Model(&models.Alert{}).Count(&totalAlerts)
 
 	var enrichedAlerts int64
-	db.Model(&models.Alert{}).Where("ai_analysis_summary IS NOT NULL AND ai_analysis_summary != ''").Count(&enrichedAlerts)
+	db.Model(&models.Alert{}).Where("ai_summary IS NOT NULL AND ai_summary != ''").Count(&enrichedAlerts)
 
 	var successRate float64
 	if totalAlerts > 0 {
@@ -562,7 +629,7 @@ func GetAIImpactOverTime(c *gin.Context) {
 
 		var enrichedCount int64
 		db.Model(&models.Alert{}).
-			Where("timestamp >= ? AND timestamp < ? AND ai_analysis_summary IS NOT NULL", dayStart, dayEnd).
+			Where("timestamp >= ? AND timestamp < ? AND ai_summary IS NOT NULL AND ai_summary != ''", dayStart, dayEnd).
 			Count(&enrichedCount)
 
 		var improvementPct float64

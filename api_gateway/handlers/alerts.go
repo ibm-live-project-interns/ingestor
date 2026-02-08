@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -9,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/ibm-live-project-interns/ingestor/shared/config"
 	"github.com/ibm-live-project-interns/ingestor/shared/constants"
 	"github.com/ibm-live-project-interns/ingestor/shared/database"
 	"github.com/ibm-live-project-interns/ingestor/shared/errors"
@@ -193,7 +196,20 @@ func getDemoAlertsOverTime(hours int) []models.TimeSeriesPoint {
 // GetAlertsOverTime returns alert counts over time
 func GetAlertsOverTime(c *gin.Context) {
 	hours := 24
-	if hoursStr := c.Query("hours"); hoursStr != "" {
+	// Support period parameter (24h, 7d, 30d, 90d) sent by frontend
+	if period := c.Query("period"); period != "" {
+		switch period {
+		case "7d":
+			hours = 168
+		case "30d":
+			hours = 720
+		case "90d":
+			hours = 2160
+		default:
+			// "24h" or fallback
+			hours = 24
+		}
+	} else if hoursStr := c.Query("hours"); hoursStr != "" {
 		if h, err := strconv.Atoi(hoursStr); err == nil && h > 0 {
 			hours = h
 		}
@@ -405,6 +421,97 @@ func DismissAlert(c *gin.Context) {
 		"message":      "Alert dismissed",
 		"alert":        updatedAlert,
 		"dismissed_by": usernameStr,
+	})
+}
+
+// ReanalyzeAlert re-sends an alert to AI-Core for fresh Watson analysis and saves the result
+func ReanalyzeAlert(c *gin.Context) {
+	id := c.Param("id")
+
+	repo := alertRepo()
+	if repo == nil {
+		c.JSON(http.StatusOK, gin.H{"message": "Re-analysis not available in demo mode", "alert_id": id})
+		return
+	}
+
+	alert, err := repo.GetByID(id)
+	if err != nil {
+		apiErr := errors.NewDatabaseError("query", err)
+		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
+		return
+	}
+	if alert == nil {
+		apiErr := errors.NewAlertNotFound(id)
+		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
+		return
+	}
+
+	// Call ai-core for re-analysis
+	aiCoreURL := config.GetEnv("AI_CORE_URL", "http://ai-core:9000")
+	payload := map[string]string{
+		"type":        alert.Severity,
+		"message":     alert.Description,
+		"source_host": alert.Device,
+		"source_ip":   alert.SourceIP,
+		"event_type":  alert.Source,
+		"category":    alert.Category,
+		"severity":    alert.Severity,
+	}
+
+	payloadBytes, _ := json.Marshal(payload)
+	req, err := http.NewRequest("POST", aiCoreURL+"/events", bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		logger.Error("Failed to create AI-Core request for alert %s: %v", id, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create AI request"})
+		return
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		logger.Error("AI-Core request failed for alert %s: %v", id, err)
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AI service unavailable", "detail": err.Error()})
+		return
+	}
+	defer resp.Body.Close()
+
+	var aiResp struct {
+		Severity          string `json:"severity"`
+		Explanation       string `json:"explanation"`
+		RootCause         string `json:"root_cause"`
+		Impact            string `json:"impact"`
+		RecommendedAction string `json:"recommended_action"`
+		Confidence        int    `json:"confidence"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&aiResp); err != nil {
+		logger.Error("Failed to decode AI-Core response for alert %s: %v", id, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse AI response"})
+		return
+	}
+
+	// Update alert with new AI analysis
+	updates := map[string]interface{}{
+		"ai_summary":        aiResp.Explanation,
+		"ai_root_cause":     aiResp.RootCause,
+		"ai_impact":         aiResp.Impact,
+		"ai_recommendation": aiResp.RecommendedAction,
+		"ai_confidence":     float64(aiResp.Confidence),
+	}
+
+	if err := repo.UpdateFields(id, updates); err != nil {
+		apiErr := errors.NewDatabaseError("update", err)
+		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
+		return
+	}
+
+	logger.Info("Alert %s re-analyzed successfully: severity=%s", id, aiResp.Severity)
+
+	// Return updated alert
+	updatedAlert, _ := repo.GetByID(id)
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Alert re-analyzed successfully",
+		"alert":   updatedAlert,
 	})
 }
 

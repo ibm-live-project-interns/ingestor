@@ -26,14 +26,14 @@ type Ticket struct {
 
 	// Related entities
 	AlertID  *string `gorm:"size:50;index" json:"alert_id,omitempty"`
-	DeviceID string  `gorm:"size:100;index" json:"device_id,omitempty"`
+	DeviceID *string `gorm:"size:100;index" json:"device_id,omitempty"`
 
 	// Timing
 	DueDate    *time.Time `json:"due_date,omitempty"`
 	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
 
-	// Tags stored as comma-separated string
-	Tags string `gorm:"size:500" json:"-"`
+	// Tags - ignored by GORM (DB column is text[] which needs pq.StringArray)
+	Tags string `gorm:"-" json:"-"`
 }
 
 // TableName returns the table name for Ticket
@@ -117,6 +117,7 @@ type UpdateTicketRequest struct {
 	Priority    string   `json:"priority,omitempty" binding:"omitempty,oneof=critical high medium low"`
 	Status      string   `json:"status,omitempty" binding:"omitempty,oneof=open in-progress pending resolved closed"`
 	Category    string   `json:"category,omitempty"`
+	AlertID     *string  `json:"alert_id,omitempty"`
 	Assignee    string   `json:"assignee,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
 }

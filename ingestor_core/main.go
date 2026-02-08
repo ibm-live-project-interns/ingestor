@@ -39,36 +39,49 @@ func main() {
 
 		// 1. Parse raw JSON
 		if err := c.ShouldBindJSON(&raw); err != nil {
+			log.Printf("[ingestor-core] ERROR: invalid JSON payload: %v", err)
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": "invalid JSON payload",
+				"detail": err.Error(),
 			})
 			return
 		}
 
+		log.Printf("[ingestor-core] Received event: event_type=%v source_host=%v severity=%v", raw["event_type"], raw["source_host"], raw["severity"])
+
 		// 2. Normalize
 		event := normalizer.Normalize(raw)
+		log.Printf("[ingestor-core] Normalized: type=%s severity=%s source=%s ip=%s", event.EventType, event.Severity, event.SourceHost, event.SourceIP)
 
 		// 3. Validate
 		if err := validator.ValidateEvent(event); err != nil {
+			log.Printf("[ingestor-core] VALIDATION FAILED: %v (event_type=%s severity=%s source=%s)", err, event.EventType, event.Severity, event.SourceHost)
 			c.JSON(http.StatusBadRequest, gin.H{
 				"error": err.Error(),
 			})
 			return
 		}
+		log.Printf("[ingestor-core] Validation passed for event from %s", event.SourceHost)
 
 		// 4. Enrich
 		event = enricher.Enrich(event)
 
-		// 5. Forward
-		resp, err := forwarder.Forward(event.ToRoutedEvent(), eventRouterURL)
+		// 5. Forward to Event Router
+		routedEvent := event.ToRoutedEvent()
+		log.Printf("[ingestor-core] Forwarding to Event Router: type(severity)=%s event_type=%s source=%s", routedEvent.Type, routedEvent.EventType, routedEvent.SourceHost)
+
+		resp, err := forwarder.Forward(routedEvent, eventRouterURL)
 		if err != nil {
+			log.Printf("[ingestor-core] ERROR: forwarding to Event Router failed: %v", err)
 			c.JSON(http.StatusBadGateway, gin.H{
-				"error": err.Error(),
+				"error": "failed to forward event to router",
+				"detail": err.Error(),
 			})
 			return
 		}
 
 		// 6. Success
+		log.Printf("[ingestor-core] Event ingested and forwarded successfully: type=%s severity=%s", event.EventType, event.Severity)
 		c.JSON(http.StatusOK, gin.H{
 			"status":       "ingested",
 			"event_type":   event.EventType,

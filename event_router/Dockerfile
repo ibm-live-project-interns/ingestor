@@ -17,7 +17,7 @@ RUN go mod tidy
 RUN CGO_ENABLED=1 GOOS=linux go build -o event_router .
 
 FROM debian:bullseye-slim
-RUN apt-get update && apt-get install -y ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y ca-certificates wget && rm -rf /var/lib/apt/lists/*
 WORKDIR /root/
 COPY --from=builder /app/event_router/event_router .
 COPY --from=builder /app/event_router/config.json .

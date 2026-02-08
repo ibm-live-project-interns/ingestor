@@ -30,16 +30,16 @@ type Alert struct {
 	// Timing
 	Timestamp   time.Time  `gorm:"not null;index" json:"timestamp"`
 	ResolvedAt  *time.Time `json:"resolved_at,omitempty"`
-	AckedAt     *time.Time `json:"acknowledged_at,omitempty"`
-	AckedBy     string     `gorm:"size:100" json:"acknowledged_by,omitempty"`
+	AckedAt     *time.Time `gorm:"column:acknowledged_at" json:"acknowledged_at,omitempty"`
+	AckedBy     string     `gorm:"column:acknowledged_by;size:100" json:"acknowledged_by,omitempty"`
 	ResolvedBy  string     `gorm:"size:100" json:"resolved_by,omitempty"`
 	DismissedBy string     `gorm:"size:100" json:"dismissed_by,omitempty"`
 
-	// AI Analysis (stored as JSON)
-	AIAnalysisSummary        string  `gorm:"type:text" json:"ai_summary,omitempty"`
-	AIAnalysisRootCause      string  `gorm:"type:text" json:"ai_root_cause,omitempty"`
-	AIAnalysisImpact         string  `gorm:"type:text" json:"ai_impact,omitempty"`
-	AIAnalysisRecommendation string  `gorm:"type:text" json:"ai_recommendation,omitempty"`
+	// AI Analysis
+	AIAnalysisSummary        string  `gorm:"column:ai_summary;type:text" json:"ai_summary,omitempty"`
+	AIAnalysisRootCause      string  `gorm:"column:ai_root_cause;type:text" json:"ai_root_cause,omitempty"`
+	AIAnalysisImpact         string  `gorm:"column:ai_impact;type:text" json:"ai_impact,omitempty"`
+	AIAnalysisRecommendation string  `gorm:"column:ai_recommendation;type:text" json:"ai_recommendation,omitempty"`
 	AIConfidence             float64 `json:"ai_confidence,omitempty"`
 
 	// Raw data

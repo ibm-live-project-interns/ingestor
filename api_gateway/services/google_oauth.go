@@ -11,6 +11,8 @@ import (
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
+
+	"github.com/ibm-live-project-interns/ingestor/shared/config"
 )
 
 // GoogleOAuthService handles Google OAuth operations
@@ -43,10 +45,7 @@ func InitGoogleOAuth() error {
 		return nil
 	}
 
-	redirectURL := os.Getenv("GOOGLE_REDIRECT_URL")
-	if redirectURL == "" {
-		redirectURL = "http://localhost:8080/api/v1/auth/google/callback"
-	}
+	redirectURL := config.GetEnv("GOOGLE_REDIRECT_URL", "http://localhost:8080/api/v1/auth/google/callback")
 
 	Google = &GoogleOAuthService{
 		Config: &oauth2.Config{

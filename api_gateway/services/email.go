@@ -19,6 +19,7 @@ import (
 type EmailService struct {
 	client       *mail.Client
 	fromAddr     string
+	fromName     string
 	templates    map[string]*template.Template
 	templateDir  string
 	frontendURL  string
@@ -60,6 +61,7 @@ func InitEmailService() error {
 	username := config.GetEnv("SMTP_USERNAME", "")
 	password := config.GetEnv("SMTP_PASSWORD", "")
 	fromAddr := config.GetEnv("SMTP_FROM", username)
+	fromName := config.GetEnv("SMTP_FROM_NAME", "NOC Alert System")
 
 	if username == "" || password == "" {
 		return fmt.Errorf("SMTP_USERNAME and SMTP_PASSWORD are required")
@@ -107,6 +109,7 @@ func InitEmailService() error {
 	Email = &EmailService{
 		client:       client,
 		fromAddr:     fromAddr,
+		fromName:     fromName,
 		templates:    templates,
 		templateDir:  templateDir,
 		frontendURL:  frontendURL,
@@ -222,7 +225,7 @@ func (e *EmailService) sendTemplate(toEmail, subject, templateName string, data 
 func (e *EmailService) send(toEmail, subject, htmlBody string) error {
 	msg := mail.NewMsg()
 
-	if err := msg.From(e.fromAddr); err != nil {
+	if err := msg.FromFormat(e.fromName, e.fromAddr); err != nil {
 		return fmt.Errorf("failed to set From: %w", err)
 	}
 

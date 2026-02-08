@@ -92,7 +92,7 @@ type Session struct {
 	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
 
 	UserID    uint      `gorm:"not null;index" json:"user_id"`
-	Token     string    `gorm:"uniqueIndex;not null;size:500" json:"-"`
+	Token     string    `gorm:"uniqueIndex;not null;type:text" json:"-"`
 	ExpiresAt time.Time `gorm:"not null;index" json:"expires_at"`
 	IPAddress string    `gorm:"size:45" json:"ip_address,omitempty"`
 	UserAgent string    `gorm:"size:500" json:"user_agent,omitempty"`

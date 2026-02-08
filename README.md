@@ -77,8 +77,8 @@ Routes events to appropriate downstream services based on event type.
 **Configuration** (`config.json`):
 ```json
 {
-  "critical": "http://agents-api:9000/events",
-  "high": "http://agents-api:9000/events",
+  "critical": "http://ai-core:9000/events",
+  "high": "http://ai-core:9000/events",
   "medium": "http://api-gateway:8080/api/internal/events",
   "low": "http://api-gateway:8080/api/internal/events",
   "info": "http://api-gateway:8080/api/internal/events"
@@ -159,23 +159,24 @@ For local development:
 
 ```bash
 cp .env.example .env
+```
 
 ## API Authentication
 
-**Demo Mode:** Accepts any non-empty username and password.
+A default admin user is seeded on first run: `admin@admin.com` / `admin123`
 
 ```bash
 # Login (Direct API access on port 8080)
 curl -X POST http://localhost:8080/api/v1/login \
   -H "Content-Type: application/json" \
-  -d '{"username": "admin", "password": "admin123", "role": {"id": "admin", "text": "Administrator"}}'
+  -d '{"email": "admin@admin.com", "password": "admin123"}'
 
 # Use token
 curl http://localhost:8080/api/v1/alerts \
   -H "Authorization: Bearer <your-token>"
 ```
 
-**Note:** When using the web UI at `http://localhost:3000`, nginx proxies API requests from port 3000 to port 8080.
+**Note:** When using the web UI at `http://localhost:3000`, nginx proxies API requests from port 3000 to port 8080. You can change the password or create additional users from Settings.
 
 ## Health Checks
 
