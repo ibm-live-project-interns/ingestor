@@ -234,6 +234,20 @@ func (r *TicketRepository) GetStats() (map[string]interface{}, error) {
 	}
 	stats["by_priority"] = byPriority
 
+	// Average resolution time (MTTR) in hours for resolved/closed tickets
+	// Uses resolved_at - created_at which is set precisely when a ticket transitions
+	// to resolved or closed status. COALESCE handles the case where no resolved tickets exist.
+	var avgResolutionHours float64
+	if err := r.db.Model(&models.Ticket{}).
+		Select("COALESCE(AVG(EXTRACT(EPOCH FROM (resolved_at - created_at))) / 3600, 0)").
+		Where("resolved_at IS NOT NULL").
+		Scan(&avgResolutionHours).Error; err != nil {
+		logger.Error("Failed to compute avg resolution time: %v", err)
+		// Non-fatal: default to 0 rather than failing the entire stats request
+		avgResolutionHours = 0
+	}
+	stats["avg_resolution_hours"] = avgResolutionHours
+
 	return stats, nil
 }
 

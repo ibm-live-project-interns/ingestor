@@ -18,6 +18,7 @@ import (
 	"github.com/ibm-live-project-interns/ingestor/shared/database"
 	"github.com/ibm-live-project-interns/ingestor/shared/logger"
 	"github.com/ibm-live-project-interns/ingestor/shared/middleware"
+	"github.com/ibm-live-project-interns/ingestor/shared/models"
 )
 
 func main() {
@@ -41,10 +42,14 @@ func main() {
 	if err := dbCfg.Validate(); err != nil {
 		logger.Warn("Database config incomplete (%v), running in demo mode", err)
 	} else {
-		if _, err := database.Init(dbCfg); err != nil {
+		if db, err := database.Init(dbCfg); err != nil {
 			logger.Warn("Failed to connect to database: %v. Running in demo mode", err)
 		} else {
 			logger.Info("Database connected: %s@%s:%s/%s", dbCfg.User, dbCfg.Host, dbCfg.Port, dbCfg.DBName)
+			// Auto-migrate tables that may not exist in the init.sql schema
+			if err := db.AutoMigrate(&models.AuditLog{}); err != nil {
+				logger.Warn("Auto-migration failed for audit_logs: %v", err)
+			}
 		}
 	}
 
@@ -140,6 +145,7 @@ func main() {
 			// Alert Actions
 			protected.POST("/alerts/:id/acknowledge", handlers.AcknowledgeAlert)
 			protected.POST("/alerts/:id/dismiss", handlers.DismissAlert)
+			protected.POST("/alerts/:id/resolve", handlers.ResolveAlert)
 			protected.POST("/alerts/:id/reanalyze", handlers.ReanalyzeAlert)
 
 			// Tickets (specific routes BEFORE parameterized :id)
@@ -150,6 +156,9 @@ func main() {
 			protected.POST("/tickets", handlers.CreateTicket)
 			protected.PUT("/tickets/:id", handlers.UpdateTicket)
 			protected.PATCH("/tickets/:id", handlers.UpdateTicket)
+			protected.DELETE("/tickets/:id", handlers.DeleteTicket)
+			protected.GET("/tickets/:id/comments", handlers.GetTicketComments)
+			protected.POST("/tickets/:id/comments", handlers.AddTicketComment)
 
 			// Trends
 			protected.GET("/trends/kpi", handlers.GetTrendsKPI)
@@ -158,6 +167,7 @@ func main() {
 			protected.GET("/devices", handlers.GetDevices)
 			protected.GET("/devices/noisy", handlers.GetNoisyDevices)
 			protected.GET("/devices/:id", handlers.GetDeviceByID)
+			protected.GET("/devices/:id/metrics", handlers.GetDeviceMetrics)
 
 			// AI
 			protected.GET("/ai/metrics", handlers.GetAIMetrics)
@@ -168,8 +178,42 @@ func main() {
 			protected.GET("/settings/notifications", handlers.GetNotificationPreferences)
 			protected.PUT("/settings/notifications", handlers.UpdateNotificationPreferences)
 
+			// User Management (admin-only, enforced inside handlers)
+			protected.GET("/users", handlers.GetUsers)
+			protected.GET("/users/:id", handlers.GetUserByID)
+			protected.PUT("/users/:id", handlers.UpdateUser)
+			protected.DELETE("/users/:id", handlers.DeleteUser)
+			protected.POST("/users/:id/reset-password", handlers.ResetUserPassword)
+
+			// Profile (self-service)
+			protected.PUT("/me", handlers.UpdateProfile)
+			protected.PUT("/me/password", handlers.ChangePassword)
+
 			// Reports
 			protected.GET("/reports/export", handlers.ExportReport)
+
+			// SLA Reports
+			protected.GET("/reports/sla", handlers.GetSLAOverview)
+			protected.GET("/reports/sla/violations", handlers.GetSLAViolations)
+			protected.GET("/reports/sla/trend", handlers.GetSLATrend)
+
+			// Audit Logs (admin-only, enforced inside handlers)
+			protected.GET("/audit-logs", handlers.GetAuditLogs)
+			protected.GET("/audit-logs/actions", handlers.GetAuditLogActions)
+
+			// On-Call Schedule
+			protected.GET("/on-call/current", handlers.GetCurrentOnCall)
+			protected.GET("/on-call/schedule", handlers.GetOnCallSchedule)
+
+			// Network Topology
+			protected.GET("/topology", handlers.GetTopology)
+
+			// Runbooks
+			protected.GET("/runbooks", handlers.GetRunbooks)
+			protected.GET("/runbooks/:id", handlers.GetRunbookByID)
+			protected.POST("/runbooks", handlers.CreateRunbook)
+			protected.PUT("/runbooks/:id", handlers.UpdateRunbook)
+			protected.DELETE("/runbooks/:id", handlers.DeleteRunbook)
 
 			// Configuration - Threshold Rules
 			protected.GET("/configuration/rules", handlers.GetRules)
@@ -198,6 +242,17 @@ func main() {
 			protected.GET("/configuration/maintenance/:id", handlers.GetWindowByID)
 			protected.PUT("/configuration/maintenance/:id", handlers.UpdateWindow)
 			protected.DELETE("/configuration/maintenance/:id", handlers.DeleteWindow)
+
+			// Configuration - Global Settings
+			protected.GET("/configuration/global-settings", handlers.GetGlobalSettings)
+			protected.PUT("/configuration/global-settings", handlers.UpdateGlobalSettings)
+
+			// Service Status (application-level health checks)
+			protected.GET("/service-status", handlers.GetServiceStatus)
+
+			// Docker Container Status & Logs
+			protected.GET("/services/status", handlers.GetDockerServiceStatus)
+			protected.GET("/services/:name/logs", handlers.GetDockerServiceLogs)
 
 			// Ingest (also available internally)
 			protected.POST("/events", handlers.IngestEvent)

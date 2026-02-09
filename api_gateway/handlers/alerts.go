@@ -79,6 +79,18 @@ func GetAlerts(c *gin.Context) {
 		Device:   c.Query("device"),
 	}
 
+	// Parse time range filters
+	if fromStr := c.Query("from"); fromStr != "" {
+		if t, err := time.Parse(time.RFC3339, fromStr); err == nil {
+			filter.From = &t
+		}
+	}
+	if toStr := c.Query("to"); toStr != "" {
+		if t, err := time.Parse(time.RFC3339, toStr); err == nil {
+			filter.To = &t
+		}
+	}
+
 	// Parse pagination
 	if limitStr := c.Query("limit"); limitStr != "" {
 		if limit, err := strconv.Atoi(limitStr); err == nil {
@@ -229,6 +241,10 @@ func GetAlertsOverTime(c *gin.Context) {
 		return
 	}
 
+	// Ensure non-null JSON array
+	if points == nil {
+		points = []models.TimeSeriesPoint{}
+	}
 	c.JSON(http.StatusOK, points)
 }
 
@@ -421,6 +437,70 @@ func DismissAlert(c *gin.Context) {
 		"message":      "Alert dismissed",
 		"alert":        updatedAlert,
 		"dismissed_by": usernameStr,
+	})
+}
+
+// ResolveAlert marks an alert as resolved
+func ResolveAlert(c *gin.Context) {
+	id := c.Param("id")
+	username, _ := c.Get("username")
+	usernameStr := fmt.Sprintf("%v", username)
+
+	repo := alertRepo()
+	if repo == nil {
+		// Demo mode - return success
+		logger.Info("Demo mode: Alert %s resolved by %s", id, usernameStr)
+		c.JSON(http.StatusOK, gin.H{
+			"message":     "Alert resolved (demo mode)",
+			"alert_id":    id,
+			"resolved_by": usernameStr,
+		})
+		return
+	}
+
+	// First check if alert exists
+	alert, err := repo.GetByID(id)
+	if err != nil {
+		apiErr := errors.NewDatabaseError("query", err)
+		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
+		return
+	}
+	if alert == nil {
+		apiErr := errors.NewAlertNotFound(id)
+		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
+		return
+	}
+
+	// Check if alert is already resolved
+	if alert.Status == models.AlertStatusResolved {
+		apiErr := errors.NewBadRequest("Alert is already resolved")
+		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
+		return
+	}
+
+	// Check if alert is dismissed (cannot resolve a dismissed alert)
+	if alert.Status == models.AlertStatusDismissed {
+		apiErr := errors.NewBadRequest("Cannot resolve a dismissed alert")
+		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
+		return
+	}
+
+	// Update status to resolved
+	if err := repo.UpdateStatus(id, models.AlertStatusResolved, usernameStr); err != nil {
+		apiErr := errors.NewDatabaseError("update", err)
+		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
+		return
+	}
+
+	logger.Info("Alert %s resolved by %s", id, usernameStr)
+
+	// Fetch updated alert
+	updatedAlert, _ := repo.GetByID(id)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":     "Alert resolved",
+		"alert":       updatedAlert,
+		"resolved_by": usernameStr,
 	})
 }
 

@@ -140,6 +140,85 @@ func (r *UserRepository) UpdateLoginAttempt(userID uint, failed bool) error {
 	return nil
 }
 
+// UserFilter represents filter options for querying users
+type UserFilter struct {
+	Search string // Search by name, email, or username
+	Role   string
+	Limit  int
+	Offset int
+}
+
+// GetAll retrieves users with optional filtering and pagination
+func (r *UserRepository) GetAll(filter UserFilter) ([]models.User, int64, error) {
+	var users []models.User
+	var total int64
+
+	query := r.db.Model(&models.User{})
+
+	// Apply search filter (name, email, or username)
+	if filter.Search != "" {
+		search := "%" + filter.Search + "%"
+		query = query.Where(
+			"username ILIKE ? OR email ILIKE ? OR first_name ILIKE ? OR last_name ILIKE ?",
+			search, search, search, search,
+		)
+	}
+
+	// Apply role filter
+	if filter.Role != "" {
+		query = query.Where("role = ?", filter.Role)
+	}
+
+	// Count total before pagination
+	if err := query.Count(&total).Error; err != nil {
+		logger.Error("Failed to count users: %v", err)
+		return nil, 0, fmt.Errorf("failed to count users: %w", err)
+	}
+
+	// Apply pagination
+	if filter.Limit > 0 {
+		query = query.Limit(filter.Limit)
+	}
+	if filter.Offset > 0 {
+		query = query.Offset(filter.Offset)
+	}
+
+	// Order by created_at descending
+	if err := query.Order("created_at DESC").Find(&users).Error; err != nil {
+		logger.Error("Failed to list users: %v", err)
+		return nil, 0, fmt.Errorf("failed to list users: %w", err)
+	}
+
+	return users, total, nil
+}
+
+// SoftDelete soft deletes a user by ID
+func (r *UserRepository) SoftDelete(id uint) error {
+	result := r.db.Delete(&models.User{}, id)
+	if result.Error != nil {
+		logger.Error("Failed to delete user %d: %v", id, result.Error)
+		return fmt.Errorf("failed to delete user: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("user not found: %d", id)
+	}
+	logger.Info("Soft deleted user: %d", id)
+	return nil
+}
+
+// UpdateFields updates specific fields of a user
+func (r *UserRepository) UpdateFields(id uint, updates map[string]interface{}) error {
+	result := r.db.Model(&models.User{}).Where("id = ?", id).Updates(updates)
+	if result.Error != nil {
+		logger.Error("Failed to update user %d: %v", id, result.Error)
+		return fmt.Errorf("failed to update user: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("user not found: %d", id)
+	}
+	return nil
+}
+
 // SessionRepository handles session database operations
 type SessionRepository struct {
 	db *gorm.DB

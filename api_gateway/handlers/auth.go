@@ -139,8 +139,53 @@ func Login(c *gin.Context) {
 	}
 
 	db := database.Get()
-	if db == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Database not available"})
+	if db == nil || db.DB == nil {
+		// Demo mode: accept any credentials and return a demo user
+		logger.Info("Demo mode: logging in as demo user for %s", req.Email)
+		now := time.Now()
+
+		// Map common emails to roles for demo convenience
+		demoRole := "sysadmin"
+		demoName := "Demo Admin"
+		if strings.Contains(req.Email, "ops") || strings.Contains(req.Email, "noc") {
+			demoRole = "network-ops"
+			demoName = "NOC Operator"
+		} else if strings.Contains(req.Email, "sre") {
+			demoRole = "sre"
+			demoName = "SRE Engineer"
+		} else if strings.Contains(req.Email, "network") {
+			demoRole = "network-admin"
+			demoName = "Network Admin"
+		} else if strings.Contains(req.Email, "senior") || strings.Contains(req.Email, "eng") {
+			demoRole = "senior-eng"
+			demoName = "Senior Engineer"
+		}
+
+		demoUser := &models.User{
+			Email:         req.Email,
+			Username:      strings.Split(req.Email, "@")[0],
+			FirstName:     strings.Split(demoName, " ")[0],
+			LastName:      strings.Split(demoName, " ")[1],
+			Role:          demoRole,
+			IsActive:      true,
+			EmailVerified: true,
+			LastLogin:     &now,
+			CreatedAt:     now.Add(-30 * 24 * time.Hour),
+		}
+		demoUser.ID = 1
+
+		token, err := services.Auth.GenerateToken(demoUser)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+			return
+		}
+
+		c.JSON(http.StatusOK, AuthResponse{
+			Token:       token,
+			ExpiresAt:   now.Add(24 * time.Hour),
+			User:        demoUser.ToResponse(),
+			Permissions: services.GetRolePermissionsStrings(demoRole),
+		})
 		return
 	}
 
