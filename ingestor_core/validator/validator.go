@@ -2,15 +2,18 @@ package validator
 
 import (
 	"fmt"
+	"time"
 
+	"github.com/ibm-live-project-interns/ingestor/shared/constants"
 	"github.com/ibm-live-project-interns/ingestor/shared/models"
 )
 
 var allowedSeverities = map[string]bool{
-	"INFO":     true,
-	"WARN":     true,
-	"ERROR":    true,
-	"CRITICAL": true,
+	constants.SeverityCritical: true,
+	constants.SeverityHigh:     true,
+	constants.SeverityMedium:   true,
+	constants.SeverityLow:      true,
+	constants.SeverityInfo:     true,
 }
 
 func ValidateEvent(event models.Event) error {
@@ -29,5 +32,11 @@ func ValidateEvent(event models.Event) error {
 	if !allowedSeverities[event.Severity] {
 		return fmt.Errorf("validation_error: invalid severity '%s'", event.Severity)
 	}
+
+	// ❗ future timestamp validation
+	if event.EventTimestamp.After(time.Now().Add(1 * time.Minute)) {
+		return fmt.Errorf("validation_error: event_timestamp is in the future")
+	}
+
 	return nil
 }

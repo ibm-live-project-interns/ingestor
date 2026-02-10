@@ -9,7 +9,7 @@ import (
 func TestEnrich_AddsDefaults(t *testing.T) {
 	event := models.Event{
 		EventType: "metadata",
-		Message: "test event",
+		Message:   "test event",
 	}
 
 	enriched := Enrich(event)

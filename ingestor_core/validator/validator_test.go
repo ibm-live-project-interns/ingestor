@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ibm-live-project-interns/ingestor/shared/constants"
 	"github.com/ibm-live-project-interns/ingestor/shared/models"
 )
 
@@ -56,7 +57,7 @@ func TestValidateEvent_FutureTimestamp(t *testing.T) {
 		EventType:      "syslog",
 		SourceHost:     "router-1",
 		SourceIP:       "192.168.1.1",
-		Severity:       "critical",
+		Severity:       constants.SeverityCritical,
 		Category:       "network",
 		Message:        "Future event",
 		EventTimestamp: time.Now().Add(10 * time.Minute),

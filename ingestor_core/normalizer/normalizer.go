@@ -1,17 +1,18 @@
 package normalizer
 
 import (
+	"strings"
 	"time"
 
+	"github.com/ibm-live-project-interns/ingestor/shared/constants"
 	"github.com/ibm-live-project-interns/ingestor/shared/models"
 )
 
 // Normalize converts raw incoming JSON into a normalized Event
 func Normalize(raw map[string]interface{}) models.Event {
 	event := models.Event{
-		EventType: "unknown",
-		Severity:  "INFO",
-		Timestamp: time.Now(),
+		Severity: constants.SeverityInfo,    // default = "info"
+		Category: constants.DefaultCategory, // "general"
 	}
 
 	// event_type
@@ -24,22 +25,52 @@ func Normalize(raw map[string]interface{}) models.Event {
 		event.SourceHost = v
 	}
 
+	// source_ip
+	if v, ok := raw["source_ip"].(string); ok && v != "" {
+		event.SourceIP = v
+	}
+
 	// message
 	if v, ok := raw["message"].(string); ok && v != "" {
 		event.Message = v
 	}
 
-	// severity
-	if v, ok := raw["severity"].(string); ok && v != "" {
-		event.Severity = v
+	// category
+	if v, ok := raw["category"].(string); ok && v != "" {
+		event.Category = v
 	}
 
-	// timestamp (RFC3339 expected)
-	if v, ok := raw["timestamp"].(string); ok {
+	// severity (normalize to canonical lowercase)
+	if v, ok := raw["severity"].(string); ok && v != "" {
+		event.Severity = normalizeSeverity(v)
+	}
+
+	// event_timestamp
+	if v, ok := raw["event_timestamp"].(string); ok {
 		if ts, err := time.Parse(time.RFC3339, v); err == nil {
-			event.Timestamp = ts
+			event.EventTimestamp = ts
 		}
 	}
 
+	// Ensure timestamp always exists
+	if event.EventTimestamp.IsZero() {
+		event.EventTimestamp = time.Now().UTC()
+	}
+
 	return event
+}
+
+func normalizeSeverity(raw string) string {
+	switch strings.ToUpper(raw) {
+	case "CRITICAL", "ERROR", "ALERT", "EMERGENCY":
+		return constants.SeverityCritical
+	case "WARN", "WARNING":
+		return constants.SeverityHigh
+	case "NOTICE":
+		return constants.SeverityMedium
+	case "DEBUG":
+		return constants.SeverityLow
+	default:
+		return constants.SeverityInfo
+	}
 }
