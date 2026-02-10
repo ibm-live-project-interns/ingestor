@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/confluentinc/confluent-kafka-go/v2/kafka"
+	"github.com/ibm-live-project-interns/ingestor/shared/constants"
 )
 
 var kafkaProducer *kafka.Producer
@@ -29,12 +30,13 @@ func initKafka() {
 }
 
 func publishToKafka(event Event) error {
-	topic := "ingestion-events"
+
+	topic := constants.KafkaIngestionTopic
 	value, _ := json.Marshal(event)
 
 	return kafkaProducer.Produce(&kafka.Message{
 		TopicPartition: kafka.TopicPartition{
-			Topic: &topic,
+			Topic:     &topic,
 			Partition: kafka.PartitionAny,
 		},
 		Value: value,

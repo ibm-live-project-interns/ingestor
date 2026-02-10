@@ -28,7 +28,7 @@ func Publish(event models.RoutedEvent) error {
 
 	p.Produce(&kafka.Message{
 		TopicPartition: kafka.TopicPartition{Topic: &topic, Partition: kafka.PartitionAny},
-		Value: payload,
+		Value:          payload,
 	}, nil)
 
 	log.Println("📤 Event published to Kafka")
