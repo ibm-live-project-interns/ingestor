@@ -1,6 +1,6 @@
 {
-  "critical": "http://api-gateway:8080/api/internal/events",
-  "high": "http://api-gateway:8080/api/internal/events",
+  "critical": "http://ai-core:9000/events",
+  "high": "http://ai-core:9000/events",
   "medium": "http://api-gateway:8080/api/internal/events",
   "low": "http://api-gateway:8080/api/internal/events",
   "info": "http://api-gateway:8080/api/internal/events"

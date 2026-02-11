@@ -1,0 +1,15 @@
+{{/* Verify Email Template - Uses base.html for shared styles */}}
+{{template "base" .}}
+
+{{define "content"}}
+<h2>Verify your email address</h2>
+<p>Hello {{.Username}},</p>
+<p>Please verify your email address to complete your registration and activate your account.</p>
+<a href="{{.ActionURL}}" class="button">Verify email</a>
+<div class="link-text">
+    <a href="{{.ActionURL}}">{{.ActionURL}}</a>
+</div>
+<div class="notice">
+    This link expires in {{if .Custom.ExpiryHours}}{{.Custom.ExpiryHours}}{{else}}24{{end}} hours. If you did not create an account, you can ignore this email.
+</div>
+{{end}}

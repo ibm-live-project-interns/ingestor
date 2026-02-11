@@ -62,6 +62,7 @@ type RoutedEvent struct {
 	SourceIP   string `json:"source_ip,omitempty"`
 	EventType  string `json:"event_type,omitempty"`
 	Category   string `json:"category,omitempty"`
+	Severity   string `json:"severity,omitempty"`
 }
 
 // ToRoutedEvent converts a normalized Event to a RoutedEvent
@@ -73,5 +74,6 @@ func (e *Event) ToRoutedEvent() RoutedEvent {
 		SourceIP:   e.SourceIP,
 		EventType:  e.EventType,
 		Category:   e.Category,
+		Severity:   e.Severity,
 	}
 }

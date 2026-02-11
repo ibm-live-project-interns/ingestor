@@ -14,7 +14,7 @@ COPY ingestor_core/ ./ingestor_core/
 WORKDIR /app/ingestor_core
 RUN go mod download
 RUN go mod tidy
-RUN CGO_ENABLED=0 GOOS=linux go build -o ingestor_core main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -o ingestor_core .
 
 FROM alpine:latest
 RUN apk --no-cache add ca-certificates
