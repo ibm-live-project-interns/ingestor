@@ -528,9 +528,13 @@ func ReanalyzeAlert(c *gin.Context) {
 
 	// Call ai-core for re-analysis
 	aiCoreURL := config.GetEnv("AI_CORE_URL", "http://ai-core:9000")
+	message := alert.Description
+	if message == "" {
+		message = alert.Title
+	}
 	payload := map[string]string{
 		"type":        alert.Severity,
-		"message":     alert.Description,
+		"message":     message,
 		"source_host": alert.Device,
 		"source_ip":   alert.SourceIP,
 		"event_type":  alert.Source,
@@ -556,6 +560,21 @@ func ReanalyzeAlert(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 
+	// Check if AI-Core returned a non-200 status (e.g. 503 when Watson not configured)
+	if resp.StatusCode != http.StatusOK {
+		var errBody map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&errBody)
+		detail := "AI service returned an error"
+		if d, ok := errBody["detail"].(string); ok {
+			detail = d
+		} else if e, ok := errBody["error"].(string); ok {
+			detail = e
+		}
+		logger.Error("AI-Core returned %d for alert %s: %s", resp.StatusCode, id, detail)
+		c.JSON(resp.StatusCode, gin.H{"error": detail, "alert": alert})
+		return
+	}
+
 	var aiResp struct {
 		Severity          string `json:"severity"`
 		Explanation       string `json:"explanation"`
@@ -571,12 +590,17 @@ func ReanalyzeAlert(c *gin.Context) {
 	}
 
 	// Update alert with new AI analysis
+	// Normalize confidence to 0-1 range (Watson returns 0-100)
+	confidence := float64(aiResp.Confidence)
+	if confidence > 1 {
+		confidence = confidence / 100.0
+	}
 	updates := map[string]interface{}{
 		"ai_summary":        aiResp.Explanation,
 		"ai_root_cause":     aiResp.RootCause,
 		"ai_impact":         aiResp.Impact,
 		"ai_recommendation": aiResp.RecommendedAction,
-		"ai_confidence":     float64(aiResp.Confidence),
+		"ai_confidence":     confidence,
 	}
 
 	if err := repo.UpdateFields(id, updates); err != nil {
