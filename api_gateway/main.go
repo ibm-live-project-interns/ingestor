@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gin-contrib/cors"
@@ -19,6 +22,7 @@ import (
 	"github.com/ibm-live-project-interns/ingestor/shared/logger"
 	"github.com/ibm-live-project-interns/ingestor/shared/middleware"
 	"github.com/ibm-live-project-interns/ingestor/shared/models"
+	"github.com/ibm-live-project-interns/ingestor/shared/rbac"
 )
 
 func main() {
@@ -78,6 +82,9 @@ func main() {
 	gin.SetMode(ginMode)
 	router := gin.New()
 
+	// 8.3 fix: Set request body size limit for multipart forms (8MB)
+	router.MaxMultipartMemory = 8 << 20
+
 	// Global middleware
 	router.Use(middleware.Recovery())
 	router.Use(middleware.RequestLogger())
@@ -90,6 +97,7 @@ func main() {
 	}
 
 	// CORS configuration
+	// 8.3 fix: Reduced MaxAge from 12 hours to 6 hours
 	corsOrigins := config.GetEnv("CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:5174,http://localhost:3000")
 	router.Use(cors.New(cors.Config{
 		AllowOrigins:     strings.Split(corsOrigins, ","),
@@ -97,7 +105,7 @@ func main() {
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Internal-API-Key"},
 		ExposeHeaders:    []string{"Content-Length", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"},
 		AllowCredentials: true,
-		MaxAge:           12 * time.Hour,
+		MaxAge:           6 * time.Hour,
 	}))
 
 	// Internal API routes (service-to-service, API key protected)
@@ -120,6 +128,15 @@ func main() {
 		v1.GET("/auth/google/login", handlers.GoogleLogin)
 		v1.GET("/auth/google/callback", handlers.GoogleCallback)
 
+		// Email test endpoint (requires sysadmin role)
+		// Moved to protected routes for security — see testAdmin group below
+
+		// Public auth routes (no auth required - used by unauthenticated users)
+		v1.POST("/auth/verify-email", handlers.VerifyEmail)
+		v1.POST("/auth/forgot-password", handlers.ForgotPassword)
+		v1.POST("/auth/reset-password", handlers.ResetPassword)
+		v1.POST("/auth/resend-verification", handlers.ResendVerification)
+
 		// Protected routes (auth required)
 		protected := v1.Group("")
 		protected.Use(authMiddleware())
@@ -128,12 +145,8 @@ func main() {
 			protected.POST("/logout", handlers.Logout)
 			protected.GET("/me", handlers.GetCurrentUser)
 			protected.GET("/auth/me", handlers.GetCurrentUser)
-			protected.POST("/auth/verify-email", handlers.VerifyEmail)
-			protected.POST("/auth/forgot-password", handlers.ForgotPassword)
-			protected.POST("/auth/reset-password", handlers.ResetPassword)
-			protected.POST("/auth/resend-verification", handlers.ResendVerification)
 
-			// Alerts (specific routes BEFORE parameterized :id)
+			// Alerts - GET (view permissions handled by frontend, no extra RBAC)
 			protected.GET("/alerts", handlers.GetAlerts)
 			protected.GET("/alerts/summary", handlers.GetAlertsSummary)
 			protected.GET("/alerts/severity-distribution", handlers.GetSeverityDistribution)
@@ -142,28 +155,38 @@ func main() {
 			protected.GET("/alerts/distribution/time", handlers.GetAlertDistributionTime)
 			protected.GET("/alerts/:id", handlers.GetAlertByID)
 
-			// Alert Actions
-			protected.POST("/alerts/:id/acknowledge", handlers.AcknowledgeAlert)
-			protected.POST("/alerts/:id/dismiss", handlers.DismissAlert)
-			protected.POST("/alerts/:id/resolve", handlers.ResolveAlert)
-			protected.POST("/alerts/:id/reanalyze", handlers.ReanalyzeAlert)
+			// Only users with acknowledge-alerts permission can modify alert state
+			alertActions := protected.Group("")
+			alertActions.Use(middleware.RequireAnyPermission(rbac.PermAcknowledgeAlerts))
+			{
+				alertActions.POST("/alerts/:id/acknowledge", handlers.AcknowledgeAlert)
+				alertActions.POST("/alerts/:id/dismiss", handlers.DismissAlert)
+				alertActions.POST("/alerts/:id/resolve", handlers.ResolveAlert)
+				alertActions.POST("/alerts/:id/reanalyze", handlers.ReanalyzeAlert)
+			}
 
-			// Tickets (specific routes BEFORE parameterized :id)
+			// Tickets - GET (view permissions handled by frontend)
 			protected.GET("/tickets", handlers.GetTickets)
 			protected.GET("/tickets/stats", handlers.GetTicketStats)
 			protected.GET("/tickets/export", handlers.ExportTickets)
 			protected.GET("/tickets/:id", handlers.GetTicketByID)
-			protected.POST("/tickets", handlers.CreateTicket)
-			protected.PUT("/tickets/:id", handlers.UpdateTicket)
-			protected.PATCH("/tickets/:id", handlers.UpdateTicket)
-			protected.DELETE("/tickets/:id", handlers.DeleteTicket)
 			protected.GET("/tickets/:id/comments", handlers.GetTicketComments)
-			protected.POST("/tickets/:id/comments", handlers.AddTicketComment)
+
+			// Only users with create-tickets permission can modify tickets
+			ticketActions := protected.Group("")
+			ticketActions.Use(middleware.RequireAnyPermission(rbac.PermCreateTickets))
+			{
+				ticketActions.POST("/tickets", handlers.CreateTicket)
+				ticketActions.PUT("/tickets/:id", handlers.UpdateTicket)
+				ticketActions.PATCH("/tickets/:id", handlers.UpdateTicket)
+				ticketActions.DELETE("/tickets/:id", handlers.DeleteTicket)
+				ticketActions.POST("/tickets/:id/comments", handlers.AddTicketComment)
+			}
 
 			// Trends
 			protected.GET("/trends/kpi", handlers.GetTrendsKPI)
 
-			// Devices (specific routes BEFORE parameterized :id)
+			// Devices (view permissions handled by frontend)
 			protected.GET("/devices", handlers.GetDevices)
 			protected.GET("/devices/noisy", handlers.GetNoisyDevices)
 			protected.GET("/devices/:id", handlers.GetDeviceByID)
@@ -174,22 +197,26 @@ func main() {
 			protected.GET("/ai/insights", handlers.GetAIInsights)
 			protected.GET("/ai/impact-over-time", handlers.GetAIImpactOverTime)
 
-			// User Settings
+			// User Settings (self-service, no extra RBAC)
 			protected.GET("/settings/notifications", handlers.GetNotificationPreferences)
 			protected.PUT("/settings/notifications", handlers.UpdateNotificationPreferences)
 
-			// User Management (admin-only, enforced inside handlers)
-			protected.GET("/users", handlers.GetUsers)
-			protected.GET("/users/:id", handlers.GetUserByID)
-			protected.PUT("/users/:id", handlers.UpdateUser)
-			protected.DELETE("/users/:id", handlers.DeleteUser)
-			protected.POST("/users/:id/reset-password", handlers.ResetUserPassword)
+			// User management restricted to sysadmin role
+			userAdmin := protected.Group("")
+			userAdmin.Use(middleware.RequireRole(rbac.RoleSysAdmin))
+			{
+				userAdmin.GET("/users", handlers.GetUsers)
+				userAdmin.GET("/users/:id", handlers.GetUserByID)
+				userAdmin.PUT("/users/:id", handlers.UpdateUser)
+				userAdmin.DELETE("/users/:id", handlers.DeleteUser)
+				userAdmin.POST("/users/:id/reset-password", handlers.ResetUserPassword)
+			}
 
-			// Profile (self-service)
+			// Profile (self-service, no extra RBAC)
 			protected.PUT("/me", handlers.UpdateProfile)
 			protected.PUT("/me/password", handlers.ChangePassword)
 
-			// Reports
+			// Reports (no extra RBAC, view permissions handled by frontend)
 			protected.GET("/reports/export", handlers.ExportReport)
 
 			// SLA Reports
@@ -197,9 +224,13 @@ func main() {
 			protected.GET("/reports/sla/violations", handlers.GetSLAViolations)
 			protected.GET("/reports/sla/trend", handlers.GetSLATrend)
 
-			// Audit Logs (admin-only, enforced inside handlers)
-			protected.GET("/audit-logs", handlers.GetAuditLogs)
-			protected.GET("/audit-logs/actions", handlers.GetAuditLogActions)
+			// Audit logs restricted to sysadmin role
+			auditAdmin := protected.Group("")
+			auditAdmin.Use(middleware.RequireRole(rbac.RoleSysAdmin))
+			{
+				auditAdmin.GET("/audit-logs", handlers.GetAuditLogs)
+				auditAdmin.GET("/audit-logs/actions", handlers.GetAuditLogActions)
+			}
 
 			// On-Call Schedule
 			protected.GET("/on-call/current", handlers.GetCurrentOnCall)
@@ -208,44 +239,80 @@ func main() {
 			// Network Topology
 			protected.GET("/topology", handlers.GetTopology)
 
-			// Runbooks
+			// Runbook write operations require sysadmin or senior-eng role
 			protected.GET("/runbooks", handlers.GetRunbooks)
 			protected.GET("/runbooks/:id", handlers.GetRunbookByID)
-			protected.POST("/runbooks", handlers.CreateRunbook)
-			protected.PUT("/runbooks/:id", handlers.UpdateRunbook)
-			protected.DELETE("/runbooks/:id", handlers.DeleteRunbook)
+			runbookAdmin := protected.Group("")
+			runbookAdmin.Use(middleware.RequireRole(rbac.RoleSysAdmin, rbac.RoleSeniorEng))
+			{
+				runbookAdmin.POST("/runbooks", handlers.CreateRunbook)
+				runbookAdmin.PUT("/runbooks/:id", handlers.UpdateRunbook)
+				runbookAdmin.DELETE("/runbooks/:id", handlers.DeleteRunbook)
+			}
 
-			// Configuration - Threshold Rules
-			protected.GET("/configuration/rules", handlers.GetRules)
-			protected.POST("/configuration/rules", handlers.CreateRule)
-			protected.GET("/configuration/rules/:id", handlers.GetRuleByID)
-			protected.PUT("/configuration/rules/:id", handlers.UpdateRule)
-			protected.DELETE("/configuration/rules/:id", handlers.DeleteRule)
+			// Device Groups - read access for all authenticated users
+			protected.GET("/device-groups", handlers.GetDeviceGroups)
+			protected.GET("/device-groups/:id", handlers.GetDeviceGroupByID)
 
-			// Configuration - Notification Channels
-			protected.GET("/configuration/channels", handlers.GetChannels)
-			protected.POST("/configuration/channels", handlers.CreateChannel)
-			protected.GET("/configuration/channels/:id", handlers.GetChannelByID)
-			protected.PUT("/configuration/channels/:id", handlers.UpdateChannel)
-			protected.DELETE("/configuration/channels/:id", handlers.DeleteChannel)
+			// Device Groups - write operations require network-admin, senior-eng, or sysadmin role
+			deviceGroupAdmin := protected.Group("/device-groups")
+			deviceGroupAdmin.Use(middleware.RequireRole(rbac.RoleNetworkAdmin, rbac.RoleSeniorEng, rbac.RoleSysAdmin))
+			{
+				deviceGroupAdmin.POST("", handlers.CreateDeviceGroup)
+				deviceGroupAdmin.PUT("/:id", handlers.UpdateDeviceGroup)
+				deviceGroupAdmin.DELETE("/:id", handlers.DeleteDeviceGroup)
+				deviceGroupAdmin.POST("/:id/devices", handlers.AddDevicesToGroup)
+				deviceGroupAdmin.DELETE("/:id/devices/:deviceId", handlers.RemoveDeviceFromGroup)
+			}
 
-			// Configuration - Escalation Policies
-			protected.GET("/configuration/policies", handlers.GetPolicies)
-			protected.POST("/configuration/policies", handlers.CreatePolicy)
-			protected.GET("/configuration/policies/:id", handlers.GetPolicyByID)
-			protected.PUT("/configuration/policies/:id", handlers.UpdatePolicy)
-			protected.DELETE("/configuration/policies/:id", handlers.DeletePolicy)
+			// Configuration management requires sysadmin or senior-eng role
+			configAdmin := protected.Group("/configuration")
+			configAdmin.Use(middleware.RequireRole(rbac.RoleSysAdmin, rbac.RoleSeniorEng))
+			{
+				// Threshold Rules
+				configAdmin.GET("/rules", handlers.GetRules)
+				configAdmin.POST("/rules", handlers.CreateRule)
+				configAdmin.GET("/rules/:id", handlers.GetRuleByID)
+				configAdmin.PUT("/rules/:id", handlers.UpdateRule)
+				configAdmin.DELETE("/rules/:id", handlers.DeleteRule)
 
-			// Configuration - Maintenance Windows
-			protected.GET("/configuration/maintenance", handlers.GetWindows)
-			protected.POST("/configuration/maintenance", handlers.CreateWindow)
-			protected.GET("/configuration/maintenance/:id", handlers.GetWindowByID)
-			protected.PUT("/configuration/maintenance/:id", handlers.UpdateWindow)
-			protected.DELETE("/configuration/maintenance/:id", handlers.DeleteWindow)
+				// Notification Channels
+				configAdmin.GET("/channels", handlers.GetChannels)
+				configAdmin.POST("/channels", handlers.CreateChannel)
+				configAdmin.GET("/channels/:id", handlers.GetChannelByID)
+				configAdmin.PUT("/channels/:id", handlers.UpdateChannel)
+				configAdmin.DELETE("/channels/:id", handlers.DeleteChannel)
 
-			// Configuration - Global Settings
+				// Escalation Policies
+				configAdmin.GET("/policies", handlers.GetPolicies)
+				configAdmin.POST("/policies", handlers.CreatePolicy)
+				configAdmin.GET("/policies/:id", handlers.GetPolicyByID)
+				configAdmin.PUT("/policies/:id", handlers.UpdatePolicy)
+				configAdmin.DELETE("/policies/:id", handlers.DeletePolicy)
+
+				// Maintenance Windows
+				configAdmin.GET("/maintenance", handlers.GetWindows)
+				configAdmin.POST("/maintenance", handlers.CreateWindow)
+				configAdmin.GET("/maintenance/:id", handlers.GetWindowByID)
+				configAdmin.PUT("/maintenance/:id", handlers.UpdateWindow)
+				configAdmin.DELETE("/maintenance/:id", handlers.DeleteWindow)
+			}
+
+			// Global Settings - GET is open, PUT requires sysadmin
 			protected.GET("/configuration/global-settings", handlers.GetGlobalSettings)
-			protected.PUT("/configuration/global-settings", handlers.UpdateGlobalSettings)
+			globalSettingsAdmin := protected.Group("")
+			globalSettingsAdmin.Use(middleware.RequireRole(rbac.RoleSysAdmin))
+			{
+				globalSettingsAdmin.PUT("/configuration/global-settings", handlers.UpdateGlobalSettings)
+			}
+
+			// Email test endpoint (sysadmin only, must not be public)
+			testAdmin := protected.Group("")
+			testAdmin.Use(middleware.RequireRole(rbac.RoleSysAdmin))
+			{
+				testAdmin.POST("/test/send-all-emails", handlers.SendAllTestEmails)
+				testAdmin.GET("/test/send-all-emails", handlers.SendAllTestEmails)
+			}
 
 			// Service Status (application-level health checks)
 			protected.GET("/service-status", handlers.GetServiceStatus)
@@ -259,19 +326,55 @@ func main() {
 		}
 	}
 
-	// Start server
+	// 8.3 fix: Use http.Server with timeouts instead of router.Run()
+	// Also implements graceful shutdown with signal handling (SIGTERM/SIGINT)
 	port := config.GetEnv("API_GATEWAY_PORT", config.GetEnv("PORT", "8080"))
 	logger.Info("API Gateway running on :%s (mode=%s, cors=%s)", port, ginMode, corsOrigins)
 
-	if err := router.Run(":" + port); err != nil {
-		logger.Fatal("Failed to start API Gateway: %v", err)
+	srv := &http.Server{
+		Addr:         ":" + port,
+		Handler:      router,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 300 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
+
+	// Start server in a goroutine so we can handle shutdown signals
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Fatal("Failed to start API Gateway: %v", err)
+		}
+	}()
+
+	// Graceful shutdown: wait for SIGTERM or SIGINT
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	sig := <-quit
+	logger.Info("Received signal %v, shutting down gracefully...", sig)
+
+	// Give outstanding requests up to 30 seconds to complete
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		logger.Fatal("Server forced to shutdown: %v", err)
+	}
+
+	logger.Info("API Gateway shut down cleanly")
 }
 
 // authMiddleware validates JWT tokens using the services.Auth package
 func authMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authHeader := c.GetHeader("Authorization")
+
+		// Also check for auth_token cookie (set by OAuth callback as HTTP-only cookie)
+		if authHeader == "" {
+			if cookie, err := c.Cookie("auth_token"); err == nil && cookie != "" {
+				authHeader = "Bearer " + cookie
+			}
+		}
+
 		if authHeader == "" {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Authorization header required"})
 			c.Abort()
@@ -304,14 +407,18 @@ func authMiddleware() gin.HandlerFunc {
 	}
 }
 
-// internalAPIKeyMiddleware protects service-to-service endpoints
+// internalAPIKeyMiddleware protects service-to-service endpoints.
+// When INTERNAL_API_KEY is not configured, reject all requests
+// to prevent accidental exposure of internal endpoints.
 func internalAPIKeyMiddleware() gin.HandlerFunc {
 	apiKey := config.GetEnv("INTERNAL_API_KEY", "")
 
 	return func(c *gin.Context) {
-		// If no API key is configured, allow all internal requests (dev mode)
+		// If no API key is configured, reject all internal requests
 		if apiKey == "" {
-			c.Next()
+			logger.Warn("Internal API access rejected: INTERNAL_API_KEY not configured. Set INTERNAL_API_KEY env var to enable internal endpoints.")
+			c.JSON(http.StatusForbidden, gin.H{"error": "Internal API is not configured. Set INTERNAL_API_KEY environment variable."})
+			c.Abort()
 			return
 		}
 

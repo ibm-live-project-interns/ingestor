@@ -11,6 +11,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"api_gateway/services"
+
 	"github.com/ibm-live-project-interns/ingestor/shared/config"
 	"github.com/ibm-live-project-interns/ingestor/shared/constants"
 	"github.com/ibm-live-project-interns/ingestor/shared/database"
@@ -383,6 +385,30 @@ func AcknowledgeAlert(c *gin.Context) {
 	// Fetch updated alert
 	updatedAlert, _ := repo.GetByID(id)
 
+	// Send alert-acknowledged email notification (non-blocking)
+	if services.Email != nil && alert != nil {
+		go func() {
+			email, _ := c.Get("email")
+			emailStr := fmt.Sprintf("%v", email)
+			if emailStr == "" || emailStr == "<nil>" {
+				return
+			}
+			custom := map[string]interface{}{
+				"AlertID":   id,
+				"Title":     alert.Title,
+				"Severity":  alert.Severity,
+				"Device":    alert.Device,
+				"AckedBy":   usernameStr,
+				"Timestamp": time.Now().Format("Jan 2, 2006 3:04 PM"),
+				"ActionURL": fmt.Sprintf("%s/alerts/%s", services.Email.FrontendURL(), id),
+			}
+			subject := fmt.Sprintf("[Acknowledged] %s – %s", alert.Device, alert.Title)
+			if err := services.Email.SendNotification(emailStr, usernameStr, subject, "alert-acknowledged", custom); err != nil {
+				logger.Warn("Failed to send alert-acknowledged email: %v", err)
+			}
+		}()
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"message":         "Alert acknowledged",
 		"alert":           updatedAlert,
@@ -432,6 +458,31 @@ func DismissAlert(c *gin.Context) {
 
 	// Fetch updated alert
 	updatedAlert, _ := repo.GetByID(id)
+
+	// Send alert-dismissed email notification (non-blocking)
+	if services.Email != nil && alert != nil {
+		go func() {
+			email, _ := c.Get("email")
+			emailStr := fmt.Sprintf("%v", email)
+			if emailStr == "" || emailStr == "<nil>" {
+				return
+			}
+			custom := map[string]interface{}{
+				"AlertID":     id,
+				"Title":       alert.Title,
+				"Severity":    alert.Severity,
+				"Device":      alert.Device,
+				"DismissedBy": usernameStr,
+				"Reason":      "Dismissed by operator",
+				"Timestamp":   time.Now().Format("Jan 2, 2006 3:04 PM"),
+				"ActionURL":   fmt.Sprintf("%s/alerts/%s", services.Email.FrontendURL(), id),
+			}
+			subject := fmt.Sprintf("[Dismissed] %s – %s", alert.Device, alert.Title)
+			if err := services.Email.SendNotification(emailStr, usernameStr, subject, "alert-dismissed", custom); err != nil {
+				logger.Warn("Failed to send alert-dismissed email: %v", err)
+			}
+		}()
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":      "Alert dismissed",
@@ -497,6 +548,31 @@ func ResolveAlert(c *gin.Context) {
 	// Fetch updated alert
 	updatedAlert, _ := repo.GetByID(id)
 
+	// Send alert-resolved email notification (non-blocking)
+	if services.Email != nil && alert != nil {
+		go func() {
+			email, _ := c.Get("email")
+			emailStr := fmt.Sprintf("%v", email)
+			if emailStr == "" || emailStr == "<nil>" {
+				return
+			}
+			custom := map[string]interface{}{
+				"AlertID":    id,
+				"Title":      alert.Title,
+				"Severity":   alert.Severity,
+				"Device":     alert.Device,
+				"ResolvedBy": usernameStr,
+				"Duration":   "N/A",
+				"Timestamp":  time.Now().Format("Jan 2, 2006 3:04 PM"),
+				"ActionURL":  fmt.Sprintf("%s/alerts/%s", services.Email.FrontendURL(), id),
+			}
+			subject := fmt.Sprintf("[Resolved] %s – %s", alert.Device, alert.Title)
+			if err := services.Email.SendNotification(emailStr, usernameStr, subject, "alert-resolved", custom); err != nil {
+				logger.Warn("Failed to send alert-resolved email: %v", err)
+			}
+		}()
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"message":     "Alert resolved",
 		"alert":       updatedAlert,
@@ -528,9 +604,13 @@ func ReanalyzeAlert(c *gin.Context) {
 
 	// Call ai-core for re-analysis
 	aiCoreURL := config.GetEnv("AI_CORE_URL", "http://ai-core:9000")
+	message := alert.Description
+	if message == "" {
+		message = alert.Title
+	}
 	payload := map[string]string{
 		"type":        alert.Severity,
-		"message":     alert.Description,
+		"message":     message,
 		"source_host": alert.Device,
 		"source_ip":   alert.SourceIP,
 		"event_type":  alert.Source,
@@ -556,6 +636,21 @@ func ReanalyzeAlert(c *gin.Context) {
 	}
 	defer resp.Body.Close()
 
+	// Check if AI-Core returned a non-200 status (e.g. 503 when Watson not configured)
+	if resp.StatusCode != http.StatusOK {
+		var errBody map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&errBody)
+		detail := "AI service returned an error"
+		if d, ok := errBody["detail"].(string); ok {
+			detail = d
+		} else if e, ok := errBody["error"].(string); ok {
+			detail = e
+		}
+		logger.Error("AI-Core returned %d for alert %s: %s", resp.StatusCode, id, detail)
+		c.JSON(resp.StatusCode, gin.H{"error": detail, "alert": alert})
+		return
+	}
+
 	var aiResp struct {
 		Severity          string `json:"severity"`
 		Explanation       string `json:"explanation"`
@@ -571,12 +666,17 @@ func ReanalyzeAlert(c *gin.Context) {
 	}
 
 	// Update alert with new AI analysis
+	// Normalize confidence to 0-1 range (Watson returns 0-100)
+	confidence := float64(aiResp.Confidence)
+	if confidence > 1 {
+		confidence = confidence / 100.0
+	}
 	updates := map[string]interface{}{
 		"ai_summary":        aiResp.Explanation,
 		"ai_root_cause":     aiResp.RootCause,
 		"ai_impact":         aiResp.Impact,
 		"ai_recommendation": aiResp.RecommendedAction,
-		"ai_confidence":     float64(aiResp.Confidence),
+		"ai_confidence":     confidence,
 	}
 
 	if err := repo.UpdateFields(id, updates); err != nil {

@@ -2,6 +2,9 @@ package handlers
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -10,6 +13,77 @@ import (
 	"github.com/ibm-live-project-interns/ingestor/shared/logger"
 	"github.com/ibm-live-project-interns/ingestor/shared/models"
 )
+
+// validChannelTypes lists the allowed notification channel types.
+var validChannelTypes = map[string]bool{
+	"email": true, "Email": true,
+	"slack": true, "Slack": true,
+	"webhook": true, "Webhook": true,
+	"pagerduty": true, "PagerDuty": true,
+	"Twilio": true, "twilio": true,
+}
+
+// validateConditionValue checks if a threshold rule condition contains a
+// numeric, positive value. The condition is expected to be a string like
+// "cpu > 80" or "memory >= 90". We extract the last token and verify it
+// parses as a positive number.
+func validateConditionValue(condition string) bool {
+	parts := strings.Fields(condition)
+	if len(parts) == 0 {
+		return false
+	}
+	// The numeric value is typically the last token
+	valueStr := parts[len(parts)-1]
+	// Strip trailing % if present (e.g. "80%")
+	valueStr = strings.TrimSuffix(valueStr, "%")
+	val, err := strconv.ParseFloat(valueStr, 64)
+	if err != nil {
+		// Could be a non-numeric condition like "status == down" which is valid
+		// but not a threshold. Allow it through since the model binding already
+		// validated the field is required.
+		return true
+	}
+	return val > 0
+}
+
+// validateDuration checks if a duration string is parseable and positive.
+func validateDuration(duration string) bool {
+	if duration == "" {
+		return true // duration is optional
+	}
+	// Try Go duration format first (e.g. "5m", "1h30m")
+	d, err := time.ParseDuration(duration)
+	if err == nil {
+		return d > 0
+	}
+	// Also accept plain positive integer (interpreted as minutes by frontend)
+	if val, err := strconv.Atoi(duration); err == nil {
+		return val > 0
+	}
+	// Accept human-readable like "5 minutes", "1 hour" - pass through
+	return true
+}
+
+// validateMaintenanceSchedule checks that schedule looks like a valid date/time.
+// Returns an error message string, or "" if valid.
+func validateMaintenanceSchedule(schedule string) string {
+	if schedule == "" {
+		return ""
+	}
+	// Try RFC3339 first, then date-only, then datetime without timezone
+	formats := []string{
+		time.RFC3339,
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+	for _, f := range formats {
+		if _, err := time.Parse(f, schedule); err == nil {
+			return ""
+		}
+	}
+	return "Schedule must be a valid date/time format (RFC3339 or YYYY-MM-DD)"
+}
 
 func configRepo() *database.ConfigRepository {
 	db := database.Get()
@@ -67,6 +141,21 @@ func CreateRule(c *gin.Context) {
 		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
 		return
 	}
+
+	// Validate condition value is numeric and positive
+	if strings.TrimSpace(req.Condition) != "" && !validateConditionValue(req.Condition) {
+		apiErr := errors.NewValidation("Condition value must be numeric and positive")
+		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
+		return
+	}
+
+	// Validate duration is positive if provided
+	if !validateDuration(req.Duration) {
+		apiErr := errors.NewValidation("Duration must be a positive value")
+		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
+		return
+	}
+
 	repo := configRepo()
 	if repo == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Database not available"})
@@ -203,6 +292,21 @@ func CreateChannel(c *gin.Context) {
 		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
 		return
 	}
+
+	// Validate name is non-empty (defense-in-depth, binding:"required" should catch this)
+	if strings.TrimSpace(req.Name) == "" {
+		apiErr := errors.NewValidation("Channel name is required")
+		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
+		return
+	}
+
+	// Validate channel type is one of the allowed values
+	if !validChannelTypes[req.Type] {
+		apiErr := errors.NewValidation("Channel type must be one of: email, slack, webhook, pagerduty, Twilio")
+		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
+		return
+	}
+
 	repo := configRepo()
 	if repo == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Database not available"})
@@ -331,6 +435,21 @@ func CreatePolicy(c *gin.Context) {
 		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
 		return
 	}
+
+	// Validate name is non-empty
+	if strings.TrimSpace(req.Name) == "" {
+		apiErr := errors.NewValidation("Policy name is required")
+		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
+		return
+	}
+
+	// Validate at least one escalation level (steps >= 1)
+	if req.Steps < 1 {
+		apiErr := errors.NewValidation("Escalation policy must have at least one level (steps >= 1)")
+		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
+		return
+	}
+
 	repo := configRepo()
 	if repo == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Database not available"})
@@ -459,6 +578,21 @@ func CreateWindow(c *gin.Context) {
 		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
 		return
 	}
+
+	// Validate schedule format if provided
+	if msg := validateMaintenanceSchedule(req.Schedule); msg != "" {
+		apiErr := errors.NewValidation(msg)
+		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
+		return
+	}
+
+	// Validate duration is positive if provided
+	if !validateDuration(req.Duration) {
+		apiErr := errors.NewValidation("Duration must be a positive value")
+		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
+		return
+	}
+
 	repo := configRepo()
 	if repo == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Database not available"})

@@ -1,0 +1,24 @@
+{{define "content"}}
+<h2>Your Role Has Been Updated</h2>
+<p>Hi {{.Username}},</p>
+<p>An administrator has updated your role in {{if .AppName}}{{.AppName}}{{else}}Sentrix{{end}}.</p>
+
+<div style="background: #f4f4f4; padding: 16px; margin: 16px 0; border-left: 4px solid #0f62fe;">
+    <p style="margin: 0 0 12px 0; font-size: 14px; color: #525252;"><strong>Previous role:</strong> <span style="background: #e0e0e0; padding: 2px 8px; border-radius: 2px;">{{if .Custom.OldRole}}{{.Custom.OldRole}}{{else}}N/A{{end}}</span></p>
+    <p style="margin: 0 0 12px 0; font-size: 14px; color: #525252;"><strong>New role:</strong> <span style="background: #d0e2ff; padding: 2px 8px; border-radius: 2px; color: #0043ce;">{{if .Custom.NewRole}}{{.Custom.NewRole}}{{else}}N/A{{end}}</span></p>
+    <p style="margin: 0; font-size: 14px; color: #525252;"><strong>Changed by:</strong> {{if .Custom.ChangedBy}}{{.Custom.ChangedBy}}{{else}}System Administrator{{end}}</p>
+</div>
+
+{{if .Custom.PermissionChanges}}
+<div style="margin: 16px 0;">
+    <p style="font-size: 12px; font-weight: 600; color: #6f6f6f; text-transform: uppercase; letter-spacing: 0.32px; margin: 0 0 8px 0;">What Changed</p>
+    <p style="font-size: 14px; color: #525252; margin: 0;">{{.Custom.PermissionChanges}}</p>
+</div>
+{{end}}
+
+<a href="{{.ActionURL}}" class="button">View Your Dashboard</a>
+
+<div class="notice">
+    <p>Your new permissions are effective immediately. You may need to log out and back in to see all changes. If you have questions, contact your administrator.</p>
+</div>
+{{end}}

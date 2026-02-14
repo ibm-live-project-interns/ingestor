@@ -4,16 +4,20 @@ package constants
 const (
 	SeverityCritical = "critical"
 	SeverityHigh     = "high"
+	SeverityMajor    = "major"
 	SeverityMedium   = "medium"
+	SeverityMinor    = "minor"
 	SeverityLow      = "low"
 	SeverityInfo     = "info"
 )
 
-// AllSeverities returns all valid severity levels
+// AllSeverities returns all valid severity levels (ordered by priority descending)
 var AllSeverities = []string{
 	SeverityCritical,
 	SeverityHigh,
+	SeverityMajor,
 	SeverityMedium,
+	SeverityMinor,
 	SeverityLow,
 	SeverityInfo,
 }
@@ -35,12 +39,16 @@ func GetSeverityPriority(severity string) int {
 		return 1
 	case SeverityHigh:
 		return 2
-	case SeverityMedium:
+	case SeverityMajor:
 		return 3
-	case SeverityLow:
+	case SeverityMedium:
 		return 4
-	case SeverityInfo:
+	case SeverityMinor:
 		return 5
+	case SeverityLow:
+		return 6
+	case SeverityInfo:
+		return 7
 	default:
 		return 99 // Unknown severity gets lowest priority
 	}

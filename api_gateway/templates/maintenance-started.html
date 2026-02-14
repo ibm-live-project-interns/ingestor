@@ -1,0 +1,24 @@
+{{define "content"}}
+<h2>Maintenance Window Active</h2>
+<p>Hi {{.Username}},</p>
+<p>A scheduled maintenance window is now <strong>in progress</strong>.</p>
+
+<div style="background: #fcf4d6; padding: 16px; margin: 16px 0; border-left: 4px solid #f1c21b;">
+    <p style="margin: 0 0 8px 0; font-weight: 600; font-size: 16px; color: #161616;">{{if .Custom.WindowName}}{{.Custom.WindowName}}{{else}}Maintenance In Progress{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Started:</strong> {{if .Custom.StartTime}}{{.Custom.StartTime}}{{else}}N/A{{end}} UTC</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Expected end:</strong> {{if .Custom.EndTime}}{{.Custom.EndTime}}{{else}}N/A{{end}} UTC</p>
+    {{if .Custom.AffectedDevices}}<p style="margin: 0; font-size: 14px; color: #525252;"><strong>Affected devices:</strong> {{.Custom.AffectedDevices}}</p>{{end}}
+</div>
+
+<div style="background: #defbe6; padding: 12px 16px; margin: 16px 0; border-left: 4px solid #24a148;">
+    <p style="margin: 0; font-size: 14px; color: #161616;">Alert suppression is <strong>active</strong> for affected devices. Alerts generated during this window will be automatically held until maintenance completes.</p>
+</div>
+
+<div style="background: #f4f4f4; padding: 12px 16px; margin: 16px 0;">
+    <p style="margin: 0; font-size: 14px; color: #525252;"><strong>Contact:</strong> {{if .Custom.ContactPerson}}{{.Custom.ContactPerson}}{{else}}On-call engineer{{end}}</p>
+</div>
+
+<div class="notice">
+    <p>You will receive another notification when this maintenance window is completed.</p>
+</div>
+{{end}}

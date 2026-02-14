@@ -35,15 +35,25 @@ type Alert struct {
 	ResolvedBy  string     `gorm:"size:100" json:"resolved_by,omitempty"`
 	DismissedBy string     `gorm:"size:100" json:"dismissed_by,omitempty"`
 
+	// Device details (denormalized from devices table for fast display)
+	DeviceName   string `gorm:"size:100;default:''" json:"device_name,omitempty"`
+	DeviceIP     string `gorm:"size:45" json:"device_ip,omitempty"`
+	DeviceIcon   string `gorm:"size:50" json:"device_icon,omitempty"`
+	DeviceModel  string `gorm:"size:100" json:"device_model,omitempty"`
+	DeviceVendor string `gorm:"size:100" json:"device_vendor,omitempty"`
+
 	// AI Analysis
+	AITitle                  string  `gorm:"column:ai_title;type:text" json:"ai_title,omitempty"`
 	AIAnalysisSummary        string  `gorm:"column:ai_summary;type:text" json:"ai_summary,omitempty"`
 	AIAnalysisRootCause      string  `gorm:"column:ai_root_cause;type:text" json:"ai_root_cause,omitempty"`
 	AIAnalysisImpact         string  `gorm:"column:ai_impact;type:text" json:"ai_impact,omitempty"`
 	AIAnalysisRecommendation string  `gorm:"column:ai_recommendation;type:text" json:"ai_recommendation,omitempty"`
-	AIConfidence             float64 `json:"ai_confidence,omitempty"`
+	AIConfidence             float64 `gorm:"column:ai_confidence;default:0" json:"ai_confidence,omitempty"`
+	Confidence               int     `gorm:"default:0" json:"confidence,omitempty"`
 
 	// Raw data
 	RawPayload string `gorm:"type:text" json:"raw_payload,omitempty"`
+	RawData    string `gorm:"type:text" json:"raw_data,omitempty"`
 
 	// Relation to tickets
 	TicketID *string `gorm:"size:50;index" json:"ticket_id,omitempty"`
@@ -62,8 +72,10 @@ func (a *Alert) IsValidSeverity() bool {
 // IsValidStatus checks if the alert status is valid
 func (a *Alert) IsValidStatus() bool {
 	validStatuses := map[string]bool{
+		AlertStatusNew:          true,
 		AlertStatusOpen:         true,
 		AlertStatusAcknowledged: true,
+		AlertStatusInProgress:   true,
 		AlertStatusResolved:     true,
 		AlertStatusDismissed:    true,
 	}
@@ -72,8 +84,10 @@ func (a *Alert) IsValidStatus() bool {
 
 // Alert status constants
 const (
+	AlertStatusNew          = "new"
 	AlertStatusOpen         = "open"
 	AlertStatusAcknowledged = "acknowledged"
+	AlertStatusInProgress   = "in-progress"
 	AlertStatusResolved     = "resolved"
 	AlertStatusDismissed    = "dismissed"
 )

@@ -1,0 +1,19 @@
+{{define "content"}}
+<h2>Account Deactivated</h2>
+<p>Hi {{.Username}},</p>
+<p>Your {{if .AppName}}{{.AppName}}{{else}}Sentrix{{end}} account has been deactivated by an administrator.</p>
+
+<div style="background: #f4f4f4; padding: 16px; margin: 16px 0; border-left: 4px solid #6f6f6f;">
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Account:</strong> {{if .Custom.Email}}{{.Custom.Email}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Deactivated by:</strong> {{if .Custom.DeactivatedBy}}{{.Custom.DeactivatedBy}}{{else}}System Administrator{{end}}</p>
+    {{if .Custom.Reason}}<p style="margin: 0; font-size: 14px; color: #525252;"><strong>Reason:</strong> {{.Custom.Reason}}</p>{{end}}
+</div>
+
+<div style="margin: 16px 0;">
+    <p style="font-size: 14px; color: #525252;">This means you will no longer be able to access {{if .AppName}}{{.AppName}}{{else}}Sentrix{{end}}. Active sessions have been terminated.</p>
+</div>
+
+<div class="notice">
+    <p>If you believe this was done in error, please contact your system administrator or IT department to have your account reactivated.</p>
+</div>
+{{end}}

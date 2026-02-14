@@ -59,7 +59,7 @@ func (r *AuditRepository) List(filter AuditFilter) ([]models.AuditLog, int64, er
 
 	// Apply search filter (username or resource ID)
 	if filter.Search != "" {
-		search := "%" + filter.Search + "%"
+		search := "%" + EscapeLike(filter.Search) + "%"
 		query = query.Where(
 			"username ILIKE ? OR resource_id ILIKE ? OR action ILIKE ? OR resource ILIKE ?",
 			search, search, search, search,

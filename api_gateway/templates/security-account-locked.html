@@ -1,0 +1,25 @@
+{{define "content"}}
+<h2 style="color: #da1e28;">Account Locked</h2>
+<p>Hi {{.Username}},</p>
+<p>Your {{if .AppName}}{{.AppName}}{{else}}Sentrix{{end}} account has been <strong>temporarily locked</strong> due to too many failed login attempts.</p>
+
+<div style="background: #fff1f1; padding: 16px; margin: 16px 0; border-left: 4px solid #da1e28;">
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Failed attempts:</strong> {{if .Custom.AttemptCount}}{{.Custom.AttemptCount}}{{else}}5{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Last attempt from:</strong> {{if .Custom.IPAddress}}{{.Custom.IPAddress}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Locked at:</strong> {{if .Custom.Timestamp}}{{.Custom.Timestamp}}{{else}}N/A{{end}} UTC</p>
+    {{if .Custom.UnlockTime}}<p style="margin: 0; font-size: 14px; color: #525252;"><strong>Auto-unlock at:</strong> {{.Custom.UnlockTime}} UTC</p>{{end}}
+</div>
+
+<div style="margin: 16px 0;">
+    <p style="font-size: 14px; color: #525252;"><strong>How to unlock your account:</strong></p>
+    <div class="feature">Wait for the lockout period to expire ({{if .Custom.LockoutDuration}}{{.Custom.LockoutDuration}}{{else}}30 minutes{{end}})</div>
+    <div class="feature">Contact your system administrator for an immediate unlock</div>
+    <div class="feature">Use the password reset option to set a new password</div>
+</div>
+
+<a href="{{.ActionURL}}" class="button">Reset Your Password</a>
+
+<div class="notice">
+    <p>If you did not attempt these logins, your account may be under attack. Contact your administrator immediately and consider changing your password.</p>
+</div>
+{{end}}

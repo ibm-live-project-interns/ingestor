@@ -3,12 +3,14 @@ package handlers
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"api_gateway/services"
 
@@ -17,6 +19,15 @@ import (
 	"github.com/ibm-live-project-interns/ingestor/shared/logger"
 	"github.com/ibm-live-project-interns/ingestor/shared/models"
 )
+
+// getDemoPassword returns the required password for demo mode authentication.
+// Reads from DEMO_PASSWORD env var; falls back to a default for development only.
+func getDemoPassword() string {
+	if pw := config.GetEnv("DEMO_PASSWORD", ""); pw != "" {
+		return pw
+	}
+	return "admin123"
+}
 
 // RegisterRequest represents the registration request body
 type RegisterRequest struct {
@@ -55,6 +66,83 @@ type AuthResponse struct {
 	ExpiresAt   time.Time           `json:"expires_at"`
 	User        models.UserResponse `json:"user"`
 	Permissions []string            `json:"permissions"`
+}
+
+// writeAuditLog writes an audit log entry to the database.
+// It silently fails if the database is unavailable (demo mode).
+func writeAuditLog(c *gin.Context, action, resource, resourceID, detail string) {
+	db := database.Get()
+	if db == nil {
+		return
+	}
+
+	userID := uint(0)
+	username := "system"
+
+	if uid, exists := c.Get("userID"); exists {
+		if id, ok := uid.(uint); ok {
+			userID = id
+		}
+	}
+	if uname, exists := c.Get("username"); exists {
+		if name, ok := uname.(string); ok {
+			username = name
+		}
+	}
+
+	entry := &models.AuditLog{
+		UserID:     userID,
+		Username:   username,
+		Action:     action,
+		Resource:   resource,
+		ResourceID: resourceID,
+		Details:    models.JSONB{"detail": detail},
+		IPAddress:  c.ClientIP(),
+		Result:     "success",
+	}
+
+	repo := database.NewAuditRepository(db.DB)
+	if err := repo.Create(entry); err != nil {
+		logger.Warn("Failed to write audit log: %v", err)
+	}
+}
+
+// writeAuditLogWithResult writes an audit log entry with a custom result (success/failure).
+func writeAuditLogWithResult(c *gin.Context, action, resource, resourceID, detail, result string) {
+	db := database.Get()
+	if db == nil {
+		return
+	}
+
+	userID := uint(0)
+	username := "system"
+
+	if uid, exists := c.Get("userID"); exists {
+		if id, ok := uid.(uint); ok {
+			userID = id
+		}
+	}
+	if uname, exists := c.Get("username"); exists {
+		if name, ok := uname.(string); ok {
+			username = name
+		}
+	}
+
+	entry := &models.AuditLog{
+		UserID:     userID,
+		Username:   username,
+		Action:     action,
+		Resource:   resource,
+		ResourceID: resourceID,
+		Details:    models.JSONB{"detail": detail},
+		IPAddress:  c.ClientIP(),
+		Result:     result,
+	}
+
+	repo := database.NewAuditRepository(db.DB)
+	if err := repo.Create(entry); err != nil {
+		logger.Warn("Failed to write audit log: %v", err)
+	}
 }
 
 // Register handles user registration
@@ -98,17 +186,19 @@ func Register(c *gin.Context) {
 		return
 	}
 
-	// Create user
+	// Create user with verification token valid for 24 hours
+	verificationTokenExp := time.Now().Add(24 * time.Hour)
 	user := models.User{
-		Email:             req.Email,
-		Username:          req.Username,
-		Password:          hashedPassword,
-		FirstName:         req.FirstName,
-		LastName:          req.LastName,
-		Role:              "network-ops", // Default role
-		IsActive:          false,
-		EmailVerified:     false,
-		VerificationToken: verificationToken,
+		Email:                req.Email,
+		Username:             req.Username,
+		Password:             hashedPassword,
+		FirstName:            req.FirstName,
+		LastName:             req.LastName,
+		Role:                 "network-ops", // Default role
+		IsActive:             false,
+		EmailVerified:        false,
+		VerificationToken:    verificationToken,
+		VerificationTokenExp: &verificationTokenExp,
 	}
 
 	if err := db.Create(&user).Error; err != nil {
@@ -140,7 +230,16 @@ func Login(c *gin.Context) {
 
 	db := database.Get()
 	if db == nil || db.DB == nil {
-		// Demo mode: accept any credentials and return a demo user
+		// Demo mode: still require the demo password to prevent open access
+		if req.Password != getDemoPassword() {
+			// Log failed demo login attempt
+			logger.Warn("Demo mode: failed login attempt for %s (wrong password)", req.Email)
+			writeAuditLogWithResult(c, "auth.login", "user", req.Email,
+				fmt.Sprintf("Failed demo login for %s: invalid password", req.Email), "failure")
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+			return
+		}
+
 		logger.Info("Demo mode: logging in as demo user for %s", req.Email)
 		now := time.Now()
 
@@ -161,11 +260,19 @@ func Login(c *gin.Context) {
 			demoName = "Senior Engineer"
 		}
 
+		// Safely split name and check length before indexing to avoid out-of-bounds panic
+		nameParts := strings.Split(demoName, " ")
+		firstName := nameParts[0]
+		lastName := ""
+		if len(nameParts) > 1 {
+			lastName = nameParts[1]
+		}
+
 		demoUser := &models.User{
 			Email:         req.Email,
 			Username:      strings.Split(req.Email, "@")[0],
-			FirstName:     strings.Split(demoName, " ")[0],
-			LastName:      strings.Split(demoName, " ")[1],
+			FirstName:     firstName,
+			LastName:      lastName,
 			Role:          demoRole,
 			IsActive:      true,
 			EmailVerified: true,
@@ -180,6 +287,9 @@ func Login(c *gin.Context) {
 			return
 		}
 
+		writeAuditLog(c, "auth.login", "user", req.Email,
+			fmt.Sprintf("Demo login successful for %s (role: %s)", req.Email, demoRole))
+
 		c.JSON(http.StatusOK, AuthResponse{
 			Token:       token,
 			ExpiresAt:   now.Add(24 * time.Hour),
@@ -192,25 +302,75 @@ func Login(c *gin.Context) {
 	// Find user by email
 	var user models.User
 	if err := db.Where("email = ?", req.Email).First(&user).Error; err != nil {
+		writeAuditLogWithResult(c, "auth.login", "user", req.Email,
+			fmt.Sprintf("Login failed: user not found for email %s", req.Email), "failure")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
 
 	// Check if account is locked
 	if user.LockedUntil != nil && user.LockedUntil.After(time.Now()) {
+		writeAuditLogWithResult(c, "auth.login", "user", fmt.Sprintf("%d", user.ID),
+			fmt.Sprintf("Login rejected: account locked for %s", user.Email), "failure")
 		c.JSON(http.StatusForbidden, gin.H{"error": "Account is locked. Try again later."})
 		return
 	}
 
 	// Verify password
 	if err := services.Auth.VerifyPassword(user.Password, req.Password); err != nil {
-		// Increment failed attempts
-		user.FailedAttempts++
-		if user.FailedAttempts >= 5 {
-			lockedUntil := time.Now().Add(15 * time.Minute)
-			user.LockedUntil = &lockedUntil
+		// Use atomic database increment to prevent race conditions with concurrent login attempts
+		if err := db.Model(&models.User{}).
+			Where("id = ?", user.ID).
+			Update("failed_attempts", gorm.Expr("failed_attempts + 1")).Error; err != nil {
+			logger.Error("Failed to increment login attempts for user %d: %v", user.ID, err)
 		}
-		db.Save(&user)
+
+		// Re-read to get updated count and lock if threshold reached
+		var updated models.User
+		if err := db.First(&updated, user.ID).Error; err == nil {
+			if updated.FailedAttempts >= 5 {
+				lockedUntil := time.Now().Add(15 * time.Minute)
+				db.Model(&models.User{}).Where("id = ?", user.ID).
+					Update("locked_until", &lockedUntil)
+
+				// Send account-locked security email (non-blocking)
+				if services.Email != nil {
+					go func() {
+						custom := map[string]interface{}{
+							"AttemptCount":    fmt.Sprintf("%d", updated.FailedAttempts),
+							"IPAddress":       c.ClientIP(),
+							"Timestamp":       time.Now().UTC().Format("2006-01-02 15:04:05"),
+							"UnlockTime":      lockedUntil.UTC().Format("2006-01-02 15:04:05"),
+							"LockoutDuration": "15 minutes",
+							"ActionURL":       services.Email.FrontendURL() + "/forgot-password",
+						}
+						if err := services.Email.SendNotification(user.Email, user.Username, "Your Sentrix Account Has Been Locked", "security-account-locked", custom); err != nil {
+							logger.Warn("Failed to send account-locked email to %s: %v", user.Email, err)
+						}
+					}()
+				}
+			} else if updated.FailedAttempts >= 3 {
+				// Send failed-logins warning email at 3+ attempts (non-blocking)
+				if services.Email != nil {
+					go func() {
+						custom := map[string]interface{}{
+							"AttemptCount":     fmt.Sprintf("%d", updated.FailedAttempts),
+							"IPAddress":        c.ClientIP(),
+							"Timestamp":        time.Now().UTC().Format("2006-01-02 15:04:05"),
+							"Location":         "Unknown",
+							"LockoutThreshold": "5",
+							"ActionURL":        services.Email.FrontendURL() + "/settings",
+						}
+						if err := services.Email.SendNotification(user.Email, user.Username, "Suspicious Login Activity on Your Sentrix Account", "security-failed-logins", custom); err != nil {
+							logger.Warn("Failed to send failed-logins email to %s: %v", user.Email, err)
+						}
+					}()
+				}
+			}
+		}
+
+		writeAuditLogWithResult(c, "auth.login", "user", fmt.Sprintf("%d", user.ID),
+			fmt.Sprintf("Login failed: invalid password for %s", user.Email), "failure")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
@@ -223,15 +383,18 @@ func Login(c *gin.Context) {
 
 	// Check if account is active
 	if !user.IsActive {
+		writeAuditLogWithResult(c, "auth.login", "user", fmt.Sprintf("%d", user.ID),
+			fmt.Sprintf("Login rejected: account deactivated for %s", user.Email), "failure")
 		c.JSON(http.StatusForbidden, gin.H{"error": "Account is not active"})
 		return
 	}
 
-	// Reset failed attempts
-	user.FailedAttempts = 0
-	lastLogin := time.Now()
-	user.LastLogin = &lastLogin
-	db.Save(&user)
+	// Reset failed attempts atomically
+	db.Model(&models.User{}).Where("id = ?", user.ID).Updates(map[string]interface{}{
+		"failed_attempts": 0,
+		"locked_until":    nil,
+		"last_login":      time.Now(),
+	})
 
 	// Generate JWT token
 	token, err := services.Auth.GenerateToken(&user)
@@ -247,6 +410,9 @@ func Login(c *gin.Context) {
 		c.ClientIP(),
 		c.GetHeader("User-Agent"),
 	)
+
+	writeAuditLog(c, "auth.login", "user", fmt.Sprintf("%d", user.ID),
+		fmt.Sprintf("Login successful for %s", user.Email))
 
 	c.JSON(http.StatusOK, AuthResponse{
 		Token:       token,
@@ -300,6 +466,12 @@ func VerifyEmail(c *gin.Context) {
 	var user models.User
 	if err := db.Where("verification_token = ?", token).First(&user).Error; err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or expired verification token"})
+		return
+	}
+
+	// Check if verification token has expired
+	if user.VerificationTokenExp != nil && user.VerificationTokenExp.Before(time.Now()) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Verification token has expired. Please request a new one."})
 		return
 	}
 
@@ -398,7 +570,7 @@ func ResetPassword(c *gin.Context) {
 	}
 
 	// Check if token is expired
-	if user.ResetTokenExp.Before(time.Now()) {
+	if user.ResetTokenExp == nil || user.ResetTokenExp.Before(time.Now()) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Reset token has expired"})
 		return
 	}
@@ -421,6 +593,9 @@ func ResetPassword(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to reset password"})
 		return
 	}
+
+	writeAuditLog(c, "auth.password_reset", "user", fmt.Sprintf("%d", user.ID),
+		fmt.Sprintf("Password reset via token for %s", user.Email))
 
 	c.JSON(http.StatusOK, gin.H{"message": "Password reset successfully. You can now log in with your new password."})
 }
@@ -489,6 +664,8 @@ func ResendVerification(c *gin.Context) {
 	}
 
 	user.VerificationToken = verificationToken
+	verificationTokenExp := time.Now().Add(24 * time.Hour)
+	user.VerificationTokenExp = &verificationTokenExp
 	if err := db.Save(&user).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save verification token"})
 		return
@@ -562,6 +739,9 @@ func validateRedirectURL(redirectURL string) string {
 	return defaultRedirect
 }
 
+// oauthStateCookieName is the name of the cookie used to store OAuth state for CSRF validation.
+const oauthStateCookieName = "oauth_state"
+
 // GoogleLogin initiates Google OAuth login
 func GoogleLogin(c *gin.Context) {
 	if services.Google == nil || !services.Google.IsEnabled() {
@@ -575,6 +755,18 @@ func GoogleLogin(c *gin.Context) {
 
 	// Generate state with redirect URL encoded
 	state := generateOAuthState() + ":" + url.QueryEscape(redirectURL)
+
+	// Store OAuth state in a secure HTTP-only cookie to validate on callback and prevent CSRF attacks
+	isSecure := strings.HasPrefix(config.GetEnv("FRONTEND_URL", "http://localhost:5173"), "https")
+	c.SetCookie(
+		oauthStateCookieName, // name
+		state,                // value
+		600,                  // maxAge: 10 minutes
+		"/",                  // path
+		"",                   // domain (auto from request)
+		isSecure,             // secure
+		true,                 // httpOnly
+	)
 
 	// Get Google authorization URL
 	authURL := services.Google.GetAuthURL(state)
@@ -590,6 +782,9 @@ func GoogleCallback(c *gin.Context) {
 		return
 	}
 
+	frontendURL := config.GetEnv("FRONTEND_URL", "http://localhost:5173")
+	defaultRedirect := frontendURL + "/dashboard"
+
 	// Check for error from Google
 	if errParam := c.Query("error"); errParam != "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Google OAuth error: " + errParam})
@@ -603,10 +798,27 @@ func GoogleCallback(c *gin.Context) {
 		return
 	}
 
+	// Validate OAuth state against cookie to prevent CSRF attacks
+	stateParam := c.Query("state")
+	stateCookie, cookieErr := c.Cookie(oauthStateCookieName)
+	if cookieErr != nil || stateCookie == "" {
+		logger.Warn("OAuth callback: missing state cookie (possible CSRF)")
+		c.Redirect(http.StatusTemporaryRedirect, defaultRedirect+"?error="+url.QueryEscape("OAuth state validation failed"))
+		return
+	}
+	if stateParam != stateCookie {
+		logger.Warn("OAuth callback: state mismatch (possible CSRF). param=%s cookie=%s", stateParam, stateCookie)
+		c.Redirect(http.StatusTemporaryRedirect, defaultRedirect+"?error="+url.QueryEscape("OAuth state validation failed"))
+		return
+	}
+
+	// Clear the state cookie now that it's been validated
+	isSecure := strings.HasPrefix(frontendURL, "https")
+	c.SetCookie(oauthStateCookieName, "", -1, "/", "", isSecure, true)
+
 	// Parse state to get redirect URL, then validate against allowed origins
-	state := c.Query("state")
 	var rawRedirect string
-	if parts := strings.SplitN(state, ":", 2); len(parts) == 2 {
+	if parts := strings.SplitN(stateParam, ":", 2); len(parts) == 2 {
 		decoded, err := url.QueryUnescape(parts[1])
 		if err == nil {
 			rawRedirect = decoded
@@ -693,12 +905,20 @@ func GoogleCallback(c *gin.Context) {
 			if user.LastName == "" {
 				user.LastName = userInfo.FamilyName
 			}
-			user.IsActive = true
 			user.EmailVerified = true
 			lastLogin := time.Now()
 			user.LastLogin = &lastLogin
 			db.Save(&user)
 		}
+	}
+
+	// Reject deactivated accounts even when using OAuth login
+	if !user.IsActive {
+		logger.Warn("OAuth login rejected: account deactivated for %s", user.Email)
+		writeAuditLogWithResult(c, "auth.oauth_login", "user", fmt.Sprintf("%d", user.ID),
+			fmt.Sprintf("OAuth login rejected: account deactivated for %s", user.Email), "failure")
+		c.Redirect(http.StatusTemporaryRedirect, frontendRedirect+"?error="+url.QueryEscape("Account deactivated. Please contact an administrator."))
+		return
 	}
 
 	// Generate JWT token
@@ -721,7 +941,17 @@ func GoogleCallback(c *gin.Context) {
 
 	logger.Info("Google OAuth successful for user: %s", user.Email)
 
-	// Redirect to frontend with token
-	redirectWithToken := frontendRedirect + "?token=" + jwtToken
-	c.Redirect(http.StatusTemporaryRedirect, redirectWithToken)
+	writeAuditLog(c, "auth.oauth_login", "user", fmt.Sprintf("%d", user.ID),
+		fmt.Sprintf("Google OAuth login successful for %s", user.Email))
+
+	// Redirect to frontend login page with token as URL parameter.
+	// The frontend's LoginPage component reads ?token= and calls setOAuthToken().
+	// Use the origin from the validated redirect URL (preserves the port the user came from).
+	redirectParsed, parseErr := url.Parse(frontendRedirect)
+	redirectBase := frontendURL // fallback
+	if parseErr == nil && redirectParsed.Scheme != "" && redirectParsed.Host != "" {
+		redirectBase = redirectParsed.Scheme + "://" + redirectParsed.Host
+	}
+	loginRedirect := redirectBase + "/login?token=" + url.QueryEscape(jwtToken)
+	c.Redirect(http.StatusTemporaryRedirect, loginRedirect)
 }

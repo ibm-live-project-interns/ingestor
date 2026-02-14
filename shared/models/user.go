@@ -39,8 +39,9 @@ type User struct {
 	LockedUntil    *time.Time `json:"-"`
 
 	// Verification
-	VerificationToken string     `gorm:"size:100;index" json:"-"`
-	VerifiedAt        *time.Time `json:"verified_at,omitempty"`
+	VerificationToken    string     `gorm:"size:100;index" json:"-"`
+	VerificationTokenExp *time.Time `json:"-"`
+	VerifiedAt           *time.Time `json:"verified_at,omitempty"`
 
 	// Password Reset
 	ResetToken    string     `gorm:"size:100;index" json:"-"`

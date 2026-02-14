@@ -15,7 +15,7 @@ RUN go mod tidy
 RUN CGO_ENABLED=0 GOOS=linux go build -o api_gateway .
 
 FROM alpine:latest
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates docker-cli
 WORKDIR /root/
 COPY --from=builder /app/ingestor/api_gateway/api_gateway .
 COPY --from=builder /app/ingestor/api_gateway/templates ./templates/

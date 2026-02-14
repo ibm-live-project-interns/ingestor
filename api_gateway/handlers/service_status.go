@@ -76,11 +76,24 @@ func GetDockerServiceLogs(c *gin.Context) {
 		return
 	}
 
-	// Sanitize: only allow alphanumeric, hyphens, and underscores
+	// Sanitize: reject excessively long names to prevent abuse
+	if len(serviceName) > 128 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "service name too long (max 128 characters)"})
+		return
+	}
+
+	// Sanitize: only allow alphanumeric, hyphens, and underscores.
+	// This prevents any command injection even though exec.Command does not
+	// use a shell — it also guards against path traversal and Docker flag
+	// injection (e.g. names starting with "--").
+	if strings.HasPrefix(serviceName, "-") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid service name: must not start with a dash"})
+		return
+	}
 	for _, ch := range serviceName {
 		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
 			(ch >= '0' && ch <= '9') || ch == '-' || ch == '_') {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid service name"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid service name: only alphanumeric, hyphens, and underscores allowed"})
 			return
 		}
 	}

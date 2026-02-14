@@ -1,0 +1,24 @@
+{{define "content"}}
+<h2>New Device Login Detected</h2>
+<p>Hi {{.Username}},</p>
+<p>A new sign-in to your {{if .AppName}}{{.AppName}}{{else}}Sentrix{{end}} account was detected from an unrecognized device or location.</p>
+
+<div style="background: #fcf4d6; padding: 16px; margin: 16px 0; border-left: 4px solid #f1c21b;">
+    <p style="margin: 0 0 8px 0; font-weight: 600; font-size: 16px; color: #161616;">Login Details</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>IP address:</strong> {{if .Custom.IPAddress}}{{.Custom.IPAddress}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Browser:</strong> {{if .Custom.Browser}}{{.Custom.Browser}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Operating system:</strong> {{if .Custom.OS}}{{.Custom.OS}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Time:</strong> {{if .Custom.Timestamp}}{{.Custom.Timestamp}}{{else}}N/A{{end}} UTC</p>
+    {{if .Custom.Location}}<p style="margin: 0; font-size: 14px; color: #525252;"><strong>Location:</strong> {{.Custom.Location}}</p>{{end}}
+</div>
+
+<div style="margin: 16px 0;">
+    <p style="font-size: 14px; color: #525252;"><strong>Was this you?</strong> If you recognize this activity, no action is needed. If you don't recognize this sign-in, secure your account immediately.</p>
+</div>
+
+<a href="{{.ActionURL}}" class="button">Secure Your Account</a>
+
+<div class="notice">
+    <p>You are receiving this because a new device or location was used to access your account. You can manage security alerts in <a href="{{.DashboardURL}}/settings" style="color: #0f62fe;">Settings</a>.</p>
+</div>
+{{end}}

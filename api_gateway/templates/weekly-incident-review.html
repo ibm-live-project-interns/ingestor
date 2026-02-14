@@ -1,0 +1,51 @@
+{{define "content"}}
+<h2>Weekly Incident Review</h2>
+<p>Hi {{.Username}},</p>
+<p>Here is the incident review for the week of {{if .Custom.WeekStart}}{{.Custom.WeekStart}}{{else}}N/A{{end}} – {{if .Custom.WeekEnd}}{{.Custom.WeekEnd}}{{else}}N/A{{end}}.</p>
+
+<div style="background: #f4f4f4; padding: 16px; margin: 16px 0;">
+    <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+            <td style="padding: 12px 8px; text-align: center; border-right: 1px solid #e0e0e0;">
+                <p style="margin: 0; font-size: 28px; font-weight: 600; color: #161616;">{{if .Custom.TotalIncidents}}{{.Custom.TotalIncidents}}{{else}}0{{end}}</p>
+                <p style="margin: 4px 0 0 0; font-size: 11px; color: #6f6f6f; text-transform: uppercase;">Incidents</p>
+            </td>
+            <td style="padding: 12px 8px; text-align: center; border-right: 1px solid #e0e0e0;">
+                <p style="margin: 0; font-size: 28px; font-weight: 600; color: #24a148;">{{if .Custom.Resolved}}{{.Custom.Resolved}}{{else}}0{{end}}</p>
+                <p style="margin: 4px 0 0 0; font-size: 11px; color: #6f6f6f; text-transform: uppercase;">Resolved</p>
+            </td>
+            <td style="padding: 12px 8px; text-align: center;">
+                <p style="margin: 0; font-size: 28px; font-weight: 600; color: #161616;">{{if .Custom.AvgMTTR}}{{.Custom.AvgMTTR}}{{else}}N/A{{end}}</p>
+                <p style="margin: 4px 0 0 0; font-size: 11px; color: #6f6f6f; text-transform: uppercase;">Avg MTTR</p>
+            </td>
+        </tr>
+    </table>
+</div>
+
+{{if .Custom.TopRootCauses}}
+<div style="margin: 16px 0;">
+    <p style="font-size: 12px; font-weight: 600; color: #6f6f6f; text-transform: uppercase; letter-spacing: 0.32px; margin: 0 0 8px 0;">Top Root Causes</p>
+    <p style="font-size: 14px; color: #525252; margin: 0;">{{.Custom.TopRootCauses}}</p>
+</div>
+{{end}}
+
+{{if .Custom.RepeatOffenders}}
+<div style="margin: 16px 0;">
+    <p style="font-size: 12px; font-weight: 600; color: #6f6f6f; text-transform: uppercase; letter-spacing: 0.32px; margin: 0 0 8px 0;">Repeat Offenders</p>
+    <p style="font-size: 14px; color: #525252; margin: 0;">{{.Custom.RepeatOffenders}}</p>
+</div>
+{{end}}
+
+{{if .Custom.PreventionActions}}
+<div style="margin: 16px 0;">
+    <p style="font-size: 12px; font-weight: 600; color: #6f6f6f; text-transform: uppercase; letter-spacing: 0.32px; margin: 0 0 8px 0;">Prevention Actions Taken</p>
+    <p style="font-size: 14px; color: #525252; margin: 0;">{{.Custom.PreventionActions}}</p>
+</div>
+{{end}}
+
+<a href="{{.ActionURL}}" class="button">View Incident History</a>
+
+<div class="notice">
+    <p>This is an automated weekly report. Manage your report subscriptions in <a href="{{.DashboardURL}}/settings" style="color: #0f62fe;">Settings</a>.</p>
+</div>
+{{end}}

@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"strconv"
 	"sync"
 	"time"
 
@@ -151,13 +152,5 @@ func intToString(n int) string {
 	if n < 0 {
 		return "0"
 	}
-	if n == 0 {
-		return "0"
-	}
-	result := ""
-	for n > 0 {
-		result = string(rune('0'+n%10)) + result
-		n /= 10
-	}
-	return result
+	return strconv.Itoa(n)
 }

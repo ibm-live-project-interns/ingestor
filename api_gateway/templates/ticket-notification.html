@@ -1,0 +1,28 @@
+{{define "content"}}
+<h2>Ticket {{if .Custom.EventType}}{{.Custom.EventType}}{{else}}Update{{end}}</h2>
+<p>Hi {{.Username}},</p>
+<p>{{if .Custom.EventMessage}}{{.Custom.EventMessage}}{{else}}A ticket has been updated.{{end}}</p>
+
+<div style="background: #f4f4f4; padding: 16px; margin: 16px 0; border-left: 4px solid {{if .Custom.PriorityColor}}{{.Custom.PriorityColor}}{{else}}#0f62fe{{end}};">
+    <p style="margin: 0 0 8px 0; font-weight: 600; font-size: 16px; color: #161616;">{{if .Custom.TicketID}}{{.Custom.TicketID}}{{end}}: {{if .Custom.Title}}{{.Custom.Title}}{{else}}Untitled Ticket{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Priority:</strong> {{if .Custom.Priority}}{{.Custom.Priority}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Status:</strong> {{if .Custom.Status}}{{.Custom.Status}}{{else}}N/A{{end}}</p>
+    {{if .Custom.Assignee}}<p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Assigned to:</strong> {{.Custom.Assignee}}</p>{{end}}
+    {{if .Custom.Category}}<p style="margin: 0; font-size: 14px; color: #525252;"><strong>Category:</strong> {{.Custom.Category}}</p>{{end}}
+</div>
+
+{{if .Custom.Comment}}
+<div style="margin: 16px 0;">
+    <p style="font-size: 12px; font-weight: 600; color: #6f6f6f; text-transform: uppercase; letter-spacing: 0.32px; margin: 0 0 8px 0;">New Comment by {{if .Custom.CommentAuthor}}{{.Custom.CommentAuthor}}{{else}}Unknown{{end}}</p>
+    <div style="background: #e0e0e0; padding: 12px; border-radius: 4px;">
+        <p style="font-size: 14px; color: #161616; margin: 0;">{{.Custom.Comment}}</p>
+    </div>
+</div>
+{{end}}
+
+<a href="{{.ActionURL}}" class="button">View Ticket</a>
+
+<div class="notice">
+    <p>You can manage your notification preferences in <a href="{{.DashboardURL}}/settings" style="color: #0f62fe;">Settings</a>.</p>
+</div>
+{{end}}

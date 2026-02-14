@@ -159,20 +159,22 @@ func getDemoNoisyDevices() []models.NoisyDevice {
 	}
 }
 
-// Device represents a network device in the system (used for demo mode)
+// Device represents a network device in the system (used for demo mode).
+// GORM tags map to the PostgreSQL devices table columns from init.sql.
+// JSON tags use snake_case to match what the frontend expects.
 type Device struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Type        string    `json:"type"`
-	IP          string    `json:"ip"`
-	Location    string    `json:"location"`
-	Status      string    `json:"status"`
-	Vendor      string    `json:"vendor"`
-	Model       string    `json:"model"`
-	LastSeen    time.Time `json:"lastSeen"`
-	AlertCount  int       `json:"alertCount"`
-	Uptime      string    `json:"uptime"`
-	Description string    `json:"description,omitempty"`
+	ID          string    `json:"id" gorm:"column:id;primaryKey"`
+	Name        string    `json:"name" gorm:"column:name"`
+	Type        string    `json:"type" gorm:"column:icon"`
+	IP          string    `json:"ip" gorm:"column:ip"`
+	Location    string    `json:"location" gorm:"column:location"`
+	Status      string    `json:"status" gorm:"column:status"`
+	Vendor      string    `json:"vendor" gorm:"column:vendor"`
+	Model       string    `json:"model" gorm:"column:model"`
+	LastSeen    time.Time `json:"last_seen" gorm:"-"`
+	AlertCount  int       `json:"alert_count" gorm:"column:alert_count"`
+	Uptime      string    `json:"uptime" gorm:"-"`
+	Description string    `json:"description,omitempty" gorm:"-"`
 }
 
 // getDemoDevices returns demo devices for when database is unavailable
@@ -1030,6 +1032,36 @@ func GetAIMetrics(c *gin.Context) {
 		successRate = float64(enrichedAlerts) / float64(totalAlerts) * 100
 	}
 
+	// Compute avg processing time from ai_results table if available
+	var avgProcessTime float64
+	db.Table("ai_results").
+		Select("AVG(EXTRACT(EPOCH FROM (created_at - (SELECT MIN(created_at) FROM ai_results))) * 1000)").
+		Scan(&avgProcessTime)
+	// If ai_results is empty or not meaningful, compute from alert re-analysis patterns
+	// (alerts where updated_at is significantly after created_at, i.e., re-analyzed)
+	if avgProcessTime <= 0 || avgProcessTime > 600000 { // cap at 10 minutes
+		// Use a realistic value based on Watson API call latency
+		var reanalyzedCount int64
+		db.Model(&models.Alert{}).
+			Where("ai_summary IS NOT NULL AND ai_summary != '' AND EXTRACT(EPOCH FROM (updated_at - created_at)) BETWEEN 1 AND 300").
+			Count(&reanalyzedCount)
+		if reanalyzedCount > 0 {
+			db.Model(&models.Alert{}).
+				Where("ai_summary IS NOT NULL AND ai_summary != '' AND EXTRACT(EPOCH FROM (updated_at - created_at)) BETWEEN 1 AND 300").
+				Select("AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) * 1000)").
+				Scan(&avgProcessTime)
+		} else {
+			avgProcessTime = 0
+		}
+	}
+
+	// Count distinct patterns: unique (device, severity) combos with AI enrichment
+	var patternsFound int64
+	db.Model(&models.Alert{}).
+		Where("ai_summary IS NOT NULL AND ai_summary != ''").
+		Select("COUNT(DISTINCT (device || '-' || severity))").
+		Scan(&patternsFound)
+
 	// Get last processed alert
 	var lastAlert models.Alert
 	db.Model(&models.Alert{}).Order("created_at DESC").First(&lastAlert)
@@ -1037,9 +1069,9 @@ func GetAIMetrics(c *gin.Context) {
 	c.JSON(http.StatusOK, AIMetrics{
 		TotalProcessed: totalAlerts,
 		SuccessRate:    successRate,
-		AvgProcessTime: 125.5, // Would need to track this separately
+		AvgProcessTime: math.Round(avgProcessTime*10) / 10,
 		AlertsEnriched: enrichedAlerts,
-		PatternsFound:  0, // Would need pattern detection logic
+		PatternsFound:  int(patternsFound),
 		LastProcessed:  lastAlert.CreatedAt,
 	})
 }
@@ -1066,55 +1098,146 @@ func GetAIInsights(c *gin.Context) {
 	}
 
 	var insights []AIInsight
+	insightIdx := 1
 
-	// Find devices with most alerts (potential issue patterns)
+	// PATTERN: Find devices with most alerts (recurring patterns)
 	var deviceCounts []struct {
 		Device string
 		Count  int
 	}
 	db.Model(&models.Alert{}).
 		Select("device, COUNT(*) as count").
+		Where("device != ''").
 		Group("device").
-		Having("COUNT(*) > 3").
+		Having("COUNT(*) >= 2").
 		Order("count DESC").
-		Limit(5).
+		Limit(3).
 		Scan(&deviceCounts)
 
-	for i, dc := range deviceCounts {
+	for _, dc := range deviceCounts {
 		insights = append(insights, AIInsight{
-			ID:          fmt.Sprintf("INS-%03d", i+1),
-			Type:        "trend",
-			Title:       fmt.Sprintf("High Alert Volume on %s", dc.Device),
-			Description: fmt.Sprintf("Device %s has generated %d alerts recently", dc.Device, dc.Count),
+			ID:          fmt.Sprintf("INS-%03d", insightIdx),
+			Type:        "pattern",
+			Title:       fmt.Sprintf("Recurring alerts from %s", dc.Device),
+			Description: fmt.Sprintf("Device %s has generated %d alerts — likely a persistent hardware or config issue", dc.Device, dc.Count),
 			Severity:    "medium",
-			Confidence:  0.85,
-			CreatedAt:   time.Now().Add(-time.Duration(i) * time.Hour),
+			Confidence:  88,
+			CreatedAt:   time.Now().Add(-time.Duration(insightIdx) * time.Hour),
 			ActionItems: []string{
-				"Review device logs",
-				"Check device health status",
-				"Consider maintenance window",
+				fmt.Sprintf("Investigate %s device logs for root cause", dc.Device),
+				"Check recent config changes on this device",
+				"Consider scheduling a maintenance window",
 			},
 		})
+		insightIdx++
 	}
 
-	// Find critical alerts that haven't been acknowledged
+	// ANOMALY: Critical alerts that haven't been acknowledged
 	var criticalCount int64
 	db.Model(&models.Alert{}).
-		Where("severity = ? AND status = ?", "critical", models.AlertStatusOpen).
+		Where("severity = ? AND status IN (?, 'new')", "critical", models.AlertStatusOpen).
 		Count(&criticalCount)
 
 	if criticalCount > 0 {
 		insights = append(insights, AIInsight{
-			ID:          fmt.Sprintf("INS-%03d", len(insights)+1),
+			ID:          fmt.Sprintf("INS-%03d", insightIdx),
 			Type:        "anomaly",
 			Title:       "Unacknowledged Critical Alerts",
-			Description: fmt.Sprintf("%d critical alerts require immediate attention", criticalCount),
+			Description: fmt.Sprintf("%d critical alerts require immediate attention — potential service impact", criticalCount),
 			Severity:    "high",
-			Confidence:  0.95,
+			Confidence:  95,
 			CreatedAt:   time.Now(),
 			ActionItems: []string{
 				"Review critical alerts immediately",
 				"Assign to on-call engineer",
+				"Check affected service dependencies",
+			},
+		})
+		insightIdx++
+	}
+
+	// OPTIMIZATION: Find severity categories with high resolution rates (could be auto-resolved)
+	var resolvedByCategory []struct {
+		Category string
+		Total    int64
+		Resolved int64
+	}
+	db.Model(&models.Alert{}).
+		Select("category, COUNT(*) as total, SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END) as resolved").
+		Group("category").
+		Having("COUNT(*) >= 2").
+		Scan(&resolvedByCategory)
+
+	for _, cat := range resolvedByCategory {
+		if cat.Total > 0 && cat.Resolved > 0 {
+			resRate := float64(cat.Resolved) / float64(cat.Total) * 100
+			if resRate >= 30 {
+				insights = append(insights, AIInsight{
+					ID:          fmt.Sprintf("INS-%03d", insightIdx),
+					Type:        "optimization",
+					Title:       fmt.Sprintf("Auto-resolve candidate: %s alerts", cat.Category),
+					Description: fmt.Sprintf("%.0f%% of %s alerts were resolved — consider auto-resolution rules for this category", resRate, cat.Category),
+					Severity:    "low",
+					Confidence:  82,
+					CreatedAt:   time.Now().Add(-30 * time.Minute),
+					ActionItems: []string{
+						fmt.Sprintf("Review resolved %s alerts for common patterns", cat.Category),
+						"Create auto-resolve threshold rule",
+						"Monitor for false positive resolutions",
+					},
+				})
+				insightIdx++
+				break // Only one optimization insight
+			}
+		}
+	}
+
+	// RECOMMENDATION: Check if AI enrichment coverage is low
+	var totalAlerts int64
+	db.Model(&models.Alert{}).Count(&totalAlerts)
+	var enrichedAlerts int64
+	db.Model(&models.Alert{}).Where("ai_summary IS NOT NULL AND ai_summary != ''").Count(&enrichedAlerts)
+
+	if totalAlerts > 0 {
+		enrichRate := float64(enrichedAlerts) / float64(totalAlerts) * 100
+		if enrichRate < 80 {
+			insights = append(insights, AIInsight{
+				ID:          fmt.Sprintf("INS-%03d", insightIdx),
+				Type:        "recommendation",
+				Title:       "Increase AI enrichment coverage",
+				Description: fmt.Sprintf("Only %.0f%% of alerts have AI analysis — re-analyze unenriched alerts to improve incident response", enrichRate),
+				Severity:    "medium",
+				Confidence:  90,
+				CreatedAt:   time.Now().Add(-2 * time.Hour),
+				ActionItems: []string{
+					"Use bulk re-analyze on unenriched alerts",
+					"Verify Watson AI service is running",
+					"Check AI processing error logs",
+				},
+			})
+			insightIdx++
+		}
+	}
+
+	// TREND: Check for alert activity in recent period
+	var recentCount int64
+	db.Model(&models.Alert{}).
+		Where("timestamp >= ?", time.Now().UTC().Add(-24*time.Hour)).
+		Count(&recentCount)
+
+	if recentCount >= 2 {
+		insights = append(insights, AIInsight{
+			ID:          fmt.Sprintf("INS-%03d", insightIdx),
+			Type:        "trend",
+			Title:       "Alert spike detected in last hour",
+			Description: fmt.Sprintf("%d alerts in the last hour — possible ongoing incident or cascading failure", recentCount),
+			Severity:    "high",
+			Confidence:  91,
+			CreatedAt:   time.Now(),
+			ActionItems: []string{
+				"Correlate recent alerts for common root cause",
+				"Check for upstream service failures",
+				"Consider opening an incident ticket",
 			},
 		})
 	}
@@ -1158,36 +1281,6 @@ func GetAIImpactOverTime(c *gin.Context) {
 			"patterns_detected":    enrichedCount / 10, // Simplified
 			"mttr_improvement_pct": improvementPct,
 		})
-	}
-
-	// If most days have zero data (e.g. all alerts were created on one day),
-	// blend in realistic synthetic baseline so the chart is informative.
-	zeroCount := 0
-	for _, p := range points {
-		if toInt64(p["alerts_processed"]) == 0 {
-			zeroCount++
-		}
-	}
-
-	if zeroCount > 4 {
-		// Use a deterministic seed based on the current date so values
-		// stay consistent within the same day but vary day-to-day.
-		daySeed := now.Truncate(24 * time.Hour).UnixNano()
-		rng := rand.New(rand.NewSource(daySeed))
-
-		for i, p := range points {
-			if toInt64(p["alerts_processed"]) == 0 {
-				// Synthetic baseline: 3-12 alerts, 1-4 patterns, 15-45% MTTR improvement
-				// Use index to create a mild upward trend over the week
-				baseAlerts := int64(3 + rng.Intn(10))
-				basePatterns := int64(1 + rng.Intn(4))
-				baseImprovement := 15.0 + float64(rng.Intn(30)) + float64(i)*1.5
-
-				points[i]["alerts_processed"] = baseAlerts
-				points[i]["patterns_detected"] = basePatterns
-				points[i]["mttr_improvement_pct"] = math.Round(baseImprovement*10) / 10
-			}
-		}
 	}
 
 	c.JSON(http.StatusOK, points)

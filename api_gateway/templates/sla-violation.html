@@ -1,0 +1,24 @@
+{{define "content"}}
+<h2 style="color: #da1e28;">SLA Violation Detected</h2>
+<p>Hi {{.Username}},</p>
+<p>An alert has <strong>exceeded its SLA threshold</strong> and requires immediate attention.</p>
+
+<div style="background: #fff1f1; padding: 16px; margin: 16px 0; border-left: 4px solid #da1e28;">
+    <p style="margin: 0 0 8px 0; font-weight: 600; font-size: 16px; color: #161616;">{{if .Custom.AlertID}}{{.Custom.AlertID}}{{end}}: {{if .Custom.Title}}{{.Custom.Title}}{{else}}Alert{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Severity:</strong> {{if .Custom.Severity}}{{.Custom.Severity}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Device:</strong> {{if .Custom.Device}}{{.Custom.Device}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #da1e28;"><strong>SLA target:</strong> {{if .Custom.SLATarget}}{{.Custom.SLATarget}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #da1e28;"><strong>Actual time:</strong> {{if .Custom.ActualTime}}{{.Custom.ActualTime}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0; font-size: 14px; color: #da1e28;"><strong>Exceeded by:</strong> {{if .Custom.ExceededBy}}{{.Custom.ExceededBy}}{{else}}N/A{{end}}</p>
+</div>
+
+<div style="background: #f4f4f4; padding: 12px 16px; margin: 16px 0;">
+    <p style="margin: 0; font-size: 14px; color: #525252;"><strong>Current assignee:</strong> {{if .Custom.Assignee}}{{.Custom.Assignee}}{{else}}Unassigned{{end}}</p>
+</div>
+
+<a href="{{.ActionURL}}" class="button" style="background: #da1e28;">Take Action Now</a>
+
+<div class="notice">
+    <p>This violation has been recorded for SLA compliance reporting. View the full SLA dashboard at <a href="{{.DashboardURL}}/reports/sla" style="color: #0f62fe;">SLA Reports</a>.</p>
+</div>
+{{end}}

@@ -79,6 +79,10 @@ type AuditLogResponse struct {
 
 // ToResponse converts AuditLog to AuditLogResponse
 func (a *AuditLog) ToResponse() AuditLogResponse {
+	details := map[string]interface{}(a.Details)
+	if details == nil {
+		details = make(map[string]interface{})
+	}
 	return AuditLogResponse{
 		ID:         a.ID,
 		CreatedAt:  a.CreatedAt,
@@ -87,7 +91,7 @@ func (a *AuditLog) ToResponse() AuditLogResponse {
 		Action:     a.Action,
 		Resource:   a.Resource,
 		ResourceID: a.ResourceID,
-		Details:    map[string]interface{}(a.Details),
+		Details:    details,
 		IPAddress:  a.IPAddress,
 		Result:     a.Result,
 	}

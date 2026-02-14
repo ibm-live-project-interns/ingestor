@@ -1,0 +1,57 @@
+{{define "content"}}
+<h2>Monthly Executive Summary – {{if .Custom.MonthName}}{{.Custom.MonthName}}{{else}}N/A{{end}} {{if .Custom.Year}}{{.Custom.Year}}{{end}}</h2>
+<p>Hi {{.Username}},</p>
+<p>Here is the executive summary for network operations in {{if .Custom.MonthName}}{{.Custom.MonthName}}{{else}}this month{{end}}.</p>
+
+<div style="background: #f4f4f4; padding: 16px; margin: 16px 0;">
+    <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+            <td style="width: 50%; padding: 12px 16px; text-align: center; border-right: 1px solid #e0e0e0; border-bottom: 1px solid #e0e0e0;">
+                <p style="margin: 0; font-size: 28px; font-weight: 600; color: {{if .Custom.UptimeColor}}{{.Custom.UptimeColor}}{{else}}#24a148{{end}};">{{if .Custom.Uptime}}{{.Custom.Uptime}}{{else}}N/A{{end}}</p>
+                <p style="margin: 4px 0 0 0; font-size: 12px; color: #6f6f6f; text-transform: uppercase;">Uptime</p>
+            </td>
+            <td style="width: 50%; padding: 12px 16px; text-align: center; border-bottom: 1px solid #e0e0e0;">
+                <p style="margin: 0; font-size: 28px; font-weight: 600; color: {{if .Custom.SLAColor}}{{.Custom.SLAColor}}{{else}}#24a148{{end}};">{{if .Custom.SLACompliance}}{{.Custom.SLACompliance}}{{else}}N/A{{end}}</p>
+                <p style="margin: 4px 0 0 0; font-size: 12px; color: #6f6f6f; text-transform: uppercase;">SLA Compliance</p>
+            </td>
+        </tr>
+        <tr>
+            <td style="width: 50%; padding: 12px 16px; text-align: center; border-right: 1px solid #e0e0e0;">
+                <p style="margin: 0; font-size: 28px; font-weight: 600; color: #161616;">{{if .Custom.TotalTickets}}{{.Custom.TotalTickets}}{{else}}0{{end}}</p>
+                <p style="margin: 4px 0 0 0; font-size: 12px; color: #6f6f6f; text-transform: uppercase;">Tickets</p>
+            </td>
+            <td style="width: 50%; padding: 12px 16px; text-align: center;">
+                <p style="margin: 0; font-size: 28px; font-weight: 600; color: #161616;">{{if .Custom.TotalAlerts}}{{.Custom.TotalAlerts}}{{else}}0{{end}}</p>
+                <p style="margin: 4px 0 0 0; font-size: 12px; color: #6f6f6f; text-transform: uppercase;">Alerts</p>
+            </td>
+        </tr>
+    </table>
+</div>
+
+{{if .Custom.VolumeVsLastMonth}}
+<div style="margin: 16px 0;">
+    <p style="font-size: 12px; font-weight: 600; color: #6f6f6f; text-transform: uppercase; letter-spacing: 0.32px; margin: 0 0 8px 0;">Month-over-Month Trend</p>
+    <p style="font-size: 14px; color: #525252; margin: 0;">{{.Custom.VolumeVsLastMonth}}</p>
+</div>
+{{end}}
+
+{{if .Custom.CapacityWarnings}}
+<div style="background: #fcf4d6; padding: 12px 16px; margin: 16px 0; border-left: 4px solid #f1c21b;">
+    <p style="font-size: 12px; font-weight: 600; color: #6f6f6f; text-transform: uppercase; letter-spacing: 0.32px; margin: 0 0 8px 0;">Capacity Warnings</p>
+    <p style="margin: 0; font-size: 14px; color: #525252;">{{.Custom.CapacityWarnings}}</p>
+</div>
+{{end}}
+
+{{if .Custom.KeyHighlights}}
+<div style="margin: 16px 0;">
+    <p style="font-size: 12px; font-weight: 600; color: #6f6f6f; text-transform: uppercase; letter-spacing: 0.32px; margin: 0 0 8px 0;">Key Highlights</p>
+    <p style="font-size: 14px; color: #525252; margin: 0;">{{.Custom.KeyHighlights}}</p>
+</div>
+{{end}}
+
+<a href="{{.ActionURL}}" class="button">View Full Report</a>
+
+<div class="notice">
+    <p>This is an automated monthly executive summary. Manage your report subscriptions in <a href="{{.DashboardURL}}/settings" style="color: #0f62fe;">Settings</a>.</p>
+</div>
+{{end}}

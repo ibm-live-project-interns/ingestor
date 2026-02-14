@@ -1,0 +1,21 @@
+{{define "content"}}
+<h2>Your Account Has Been Created</h2>
+<p>Hello {{.Username}},</p>
+<p>An administrator has created a {{if .AppName}}{{.AppName}}{{else}}Sentrix{{end}} account for you. Below are your login credentials:</p>
+
+<div style="background: #f4f4f4; padding: 16px; margin: 16px 0; border-left: 4px solid #0f62fe;">
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Email:</strong> {{if .Custom.Email}}{{.Custom.Email}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Temporary password:</strong> <code style="background: #e0e0e0; padding: 2px 8px; font-family: 'IBM Plex Mono', monospace;">{{if .Custom.TempPassword}}{{.Custom.TempPassword}}{{else}}********{{end}}</code></p>
+    <p style="margin: 0; font-size: 14px; color: #525252;"><strong>Role:</strong> {{if .Custom.Role}}{{.Custom.Role}}{{else}}N/A{{end}}</p>
+</div>
+
+<div style="background: #fff1f1; padding: 12px 16px; margin: 16px 0; border-left: 4px solid #da1e28;">
+    <p style="margin: 0; font-size: 14px; color: #161616;"><strong>Important:</strong> You must change your password on your first login.</p>
+</div>
+
+<a href="{{.ActionURL}}" class="button">Sign In to {{if .AppName}}{{.AppName}}{{else}}Sentrix{{end}}</a>
+
+<div class="notice">
+    <p>This account was created by {{if .Custom.CreatedBy}}{{.Custom.CreatedBy}}{{else}}an administrator{{end}}. If you did not expect this, please contact your system administrator.</p>
+</div>
+{{end}}

@@ -1,6 +1,7 @@
 package database
 
 import (
+	"crypto/rand"
 	"fmt"
 	"time"
 
@@ -251,7 +252,7 @@ func (r *AlertRepository) GetSeverityDistribution() ([]models.SeverityDistributi
 	}
 
 	// Build distribution with all severities
-	severities := []string{"critical", "high", "medium", "low", "info"}
+	severities := []string{"critical", "high", "major", "medium", "minor", "low", "info"}
 	var distribution []models.SeverityDistribution
 	for _, sev := range severities {
 		count := countMap[sev]
@@ -350,11 +351,12 @@ func (r *AlertRepository) GetNoisyDevices(limit int) ([]models.NoisyDevice, erro
 	return noisyDevices, nil
 }
 
-// GenerateAlertID generates a unique alert ID
+// GenerateAlertID generates a unique alert ID using timestamp + random suffix
+// to avoid race conditions from count-based generation.
 func (r *AlertRepository) GenerateAlertID() (string, error) {
-	var count int64
-	if err := r.db.Model(&models.Alert{}).Count(&count).Error; err != nil {
-		return "", err
+	b := make([]byte, 3)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("failed to generate random bytes: %w", err)
 	}
-	return fmt.Sprintf("ALT-%06d", count+1), nil
+	return fmt.Sprintf("ALT-%s-%x", time.Now().UTC().Format("20060102-150405"), b), nil
 }

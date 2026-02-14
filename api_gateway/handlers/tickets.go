@@ -5,16 +5,62 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
+	"api_gateway/services"
 	"github.com/ibm-live-project-interns/ingestor/shared/database"
 	"github.com/ibm-live-project-interns/ingestor/shared/errors"
 	"github.com/ibm-live-project-interns/ingestor/shared/logger"
 	"github.com/ibm-live-project-interns/ingestor/shared/models"
 )
+
+// sendTicketEmailNotification sends email notifications for ticket events asynchronously.
+// It notifies the assignee (if set and different from actor) and any active users with email_alerts enabled.
+func sendTicketEmailNotification(ticket models.Ticket, eventType, eventMessage, comment, commentAuthor string) {
+	if services.Email == nil {
+		return
+	}
+
+	emailData := services.TicketEmailData{
+		TicketID:      ticket.ID,
+		Title:         ticket.Title,
+		Priority:      ticket.Priority,
+		Status:        ticket.Status,
+		Assignee:      ticket.Assignee,
+		Category:      ticket.Category,
+		EventType:     eventType,
+		EventMessage:  eventMessage,
+		Comment:       comment,
+		CommentAuthor: commentAuthor,
+	}
+
+	// If ticket has an assignee, try to find their email and notify them
+	if ticket.Assignee != "" {
+		db := database.Get()
+		if db != nil && db.DB != nil {
+			userRepo := database.NewUserRepository(db.DB)
+			// Try to find user by username or email
+			users, _, _ := userRepo.GetAll(database.UserFilter{})
+			for _, u := range users {
+				if (u.Username == ticket.Assignee || u.Email == ticket.Assignee ||
+					u.FirstName+" "+u.LastName == ticket.Assignee) && u.IsActive && u.EmailAlerts {
+					username := u.FirstName
+					if username == "" {
+						username = u.Username
+					}
+					if err := services.Email.SendTicketNotification(u.Email, username, emailData); err != nil {
+						logger.Error("Failed to send ticket notification to %s: %v", u.Email, err)
+					} else {
+						logger.Info("Sent ticket %s notification to assignee %s", eventType, u.Email)
+					}
+					break
+				}
+			}
+		}
+	}
+}
 
 // ticketRepo returns the ticket repository using the global database
 // Returns nil if database is not available (demo mode)
@@ -24,6 +70,51 @@ func ticketRepo() *database.TicketRepository {
 		return nil
 	}
 	return database.NewTicketRepository(db.DB)
+}
+
+// resolveDeviceNames populates DeviceName for tickets that have DeviceID but no DeviceName.
+// It queries the devices table in a single batch to avoid N+1 queries.
+func resolveDeviceNames(tickets []models.Ticket) {
+	db := database.Get()
+	if db == nil || db.DB == nil {
+		return
+	}
+
+	// Collect device IDs that need resolution
+	var needResolution []string
+	for i := range tickets {
+		if tickets[i].DeviceID != nil && *tickets[i].DeviceID != "" && tickets[i].DeviceName == "" {
+			needResolution = append(needResolution, *tickets[i].DeviceID)
+		}
+	}
+	if len(needResolution) == 0 {
+		return
+	}
+
+	// Batch query device names
+	type deviceRow struct {
+		ID   string
+		Name string
+	}
+	var rows []deviceRow
+	if err := db.DB.Raw("SELECT id, name FROM devices WHERE id IN ? AND deleted_at IS NULL", needResolution).Scan(&rows).Error; err != nil {
+		logger.Warn("Failed to resolve device names: %v", err)
+		return
+	}
+
+	nameMap := make(map[string]string, len(rows))
+	for _, r := range rows {
+		nameMap[r.ID] = r.Name
+	}
+
+	// Apply resolved names
+	for i := range tickets {
+		if tickets[i].DeviceID != nil && tickets[i].DeviceName == "" {
+			if name, ok := nameMap[*tickets[i].DeviceID]; ok {
+				tickets[i].DeviceName = name
+			}
+		}
+	}
 }
 
 // getDemoTickets returns demo tickets for when database is unavailable
@@ -47,6 +138,7 @@ func getDemoTickets() []models.Ticket {
 			Reporter:    "System",
 			AlertID:     &alertID1,
 			DeviceID:    &deviceID1,
+			DeviceName:  "Core Router 01",
 			CreatedAt:   now.Add(-2 * time.Hour),
 			UpdatedAt:   now.Add(-30 * time.Minute),
 		},
@@ -61,6 +153,7 @@ func getDemoTickets() []models.Ticket {
 			Reporter:    "Admin",
 			AlertID:     &alertID3,
 			DeviceID:    &deviceID2,
+			DeviceName:  "App Server 01",
 			CreatedAt:   now.Add(-5 * time.Hour),
 			UpdatedAt:   now.Add(-1 * time.Hour),
 		},
@@ -73,6 +166,7 @@ func getDemoTickets() []models.Ticket {
 			Category:    "Security",
 			Assignee:    "",
 			Reporter:    "Security Team",
+			DeviceName:  "FW-DMZ-03",
 			CreatedAt:   now.Add(-24 * time.Hour),
 			UpdatedAt:   now.Add(-24 * time.Hour),
 		},
@@ -87,6 +181,7 @@ func getDemoTickets() []models.Ticket {
 			Reporter:    "Monitoring System",
 			AlertID:     &alertID5,
 			DeviceID:    &deviceID4,
+			DeviceName:  "Production DB 01",
 			CreatedAt:   now.Add(-1 * time.Hour),
 			UpdatedAt:   now.Add(-15 * time.Minute),
 		},
@@ -99,6 +194,7 @@ func getDemoTickets() []models.Ticket {
 			Category:    "Network",
 			Assignee:    "Network Team",
 			Reporter:    "Change Management",
+			DeviceName:  "Distribution Switch A",
 			CreatedAt:   now.Add(-72 * time.Hour),
 			UpdatedAt:   now.Add(-48 * time.Hour),
 		},
@@ -168,6 +264,9 @@ func GetTickets(c *gin.Context) {
 		return
 	}
 
+	// Resolve device names for tickets that have device_id but no device_name
+	resolveDeviceNames(tickets)
+
 	c.JSON(http.StatusOK, gin.H{
 		"tickets": tickets,
 		"total":   total,
@@ -205,6 +304,13 @@ func GetTicketByID(c *gin.Context) {
 		return
 	}
 
+	// Resolve device name if missing
+	if ticket.DeviceID != nil && *ticket.DeviceID != "" && ticket.DeviceName == "" {
+		single := []models.Ticket{*ticket}
+		resolveDeviceNames(single)
+		ticket.DeviceName = single[0].DeviceName
+	}
+
 	c.JSON(http.StatusOK, ticket)
 }
 
@@ -236,7 +342,8 @@ func CreateTicket(c *gin.Context) {
 			Reporter:    "demo-user",
 			AlertID:     req.AlertID,
 			DeviceID:    demoDeviceID,
-			Tags:        strings.Join(req.Tags, ","),
+			DeviceName:  req.DeviceName,
+			Tags:        models.StringSlice(req.Tags),
 			CreatedAt:   now,
 			UpdatedAt:   now,
 		}
@@ -280,7 +387,8 @@ func CreateTicket(c *gin.Context) {
 		Reporter:    reporterStr,
 		AlertID:     req.AlertID,
 		DeviceID:    deviceID,
-		Tags:        strings.Join(req.Tags, ","),
+		DeviceName:  req.DeviceName,
+		Tags:        models.StringSlice(req.Tags),
 	}
 
 	if err := repo.Create(&ticket); err != nil {
@@ -290,6 +398,11 @@ func CreateTicket(c *gin.Context) {
 	}
 
 	logger.Info("Ticket %s created by %s", ticketID, reporterStr)
+
+	// Send email notification asynchronously
+	go sendTicketEmailNotification(ticket, "Created",
+		fmt.Sprintf("A new %s priority ticket has been created and assigned to you.", ticket.Priority),
+		"", "")
 
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "Ticket created successfully",
@@ -321,7 +434,7 @@ func UpdateTicket(c *gin.Context) {
 			Category:    req.Category,
 			Assignee:    req.Assignee,
 			Reporter:    "demo-user",
-			Tags:        strings.Join(req.Tags, ","),
+			Tags:        models.StringSlice(req.Tags),
 			CreatedAt:   now.Add(-1 * time.Hour),
 			UpdatedAt:   now,
 		}
@@ -370,7 +483,7 @@ func UpdateTicket(c *gin.Context) {
 		updates["alert_id"] = *req.AlertID
 	}
 	if req.Tags != nil {
-		updates["tags"] = strings.Join(req.Tags, ",")
+		updates["tags"] = models.StringSlice(req.Tags)
 	}
 
 	if len(updates) > 0 {
@@ -383,10 +496,27 @@ func UpdateTicket(c *gin.Context) {
 
 	// Get username for logging
 	username, _ := c.Get("username")
-	logger.Info("Ticket %s updated by %v", id, username)
+	usernameStr := "system"
+	if u, ok := username.(string); ok && u != "" {
+		usernameStr = u
+	}
+	logger.Info("Ticket %s updated by %s", id, usernameStr)
 
 	// Fetch updated ticket
 	updatedTicket, _ := repo.GetByID(id)
+
+	// Send email notification for significant changes (assignment or status)
+	if updatedTicket != nil {
+		if _, changed := updates["assignee"]; changed {
+			go sendTicketEmailNotification(*updatedTicket, "Assigned",
+				fmt.Sprintf("You have been assigned to ticket %s by %s.", id, usernameStr),
+				"", "")
+		} else if _, changed := updates["status"]; changed {
+			go sendTicketEmailNotification(*updatedTicket, "Updated",
+				fmt.Sprintf("Ticket %s status changed to %s by %s.", id, updatedTicket.Status, usernameStr),
+				"", "")
+		}
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Ticket updated successfully",
@@ -640,6 +770,13 @@ func AddTicketComment(c *gin.Context) {
 	}
 
 	logger.Info("Comment %s added to ticket %s by %s", commentID, ticketID, authorStr)
+
+	// Send email notification to ticket assignee about the new comment
+	if ticket != nil {
+		go sendTicketEmailNotification(*ticket, "Commented",
+			fmt.Sprintf("A new comment was added to ticket %s by %s.", ticketID, authorStr),
+			req.Content, authorStr)
+	}
 
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "Comment added successfully",

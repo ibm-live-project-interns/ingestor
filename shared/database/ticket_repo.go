@@ -1,8 +1,8 @@
 package database
 
 import (
+	"crypto/rand"
 	"fmt"
-	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -124,11 +124,14 @@ func (r *TicketRepository) Update(ticket *models.Ticket) error {
 func (r *TicketRepository) UpdateFields(id string, updates map[string]interface{}) error {
 	updates["updated_at"] = time.Now().UTC()
 
-	// Handle status change to resolved/closed
+	// Handle status transitions
 	if status, ok := updates["status"].(string); ok {
 		if status == models.TicketStatusResolved || status == models.TicketStatusClosed {
 			now := time.Now().UTC()
 			updates["resolved_at"] = &now
+		} else if status == models.TicketStatusOpen || status == models.TicketStatusInProgress || status == models.TicketStatusPending {
+			// Clear resolved_at when ticket is reopened or moved back to active status
+			updates["resolved_at"] = gorm.Expr("NULL")
 		}
 	}
 
@@ -159,13 +162,14 @@ func (r *TicketRepository) Delete(id string) error {
 	return nil
 }
 
-// GenerateTicketID generates a unique ticket ID
+// GenerateTicketID generates a unique ticket ID using timestamp + random suffix
+// to avoid race conditions from count-based generation.
 func (r *TicketRepository) GenerateTicketID() (string, error) {
-	var count int64
-	if err := r.db.Model(&models.Ticket{}).Count(&count).Error; err != nil {
-		return "", err
+	b := make([]byte, 3)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("failed to generate random bytes: %w", err)
 	}
-	return fmt.Sprintf("TKT-%06d", count+1), nil
+	return fmt.Sprintf("TKT-%s-%x", time.Now().UTC().Format("20060102-150405"), b), nil
 }
 
 // AddComment adds a comment to a ticket
@@ -251,16 +255,7 @@ func (r *TicketRepository) GetStats() (map[string]interface{}, error) {
 	return stats, nil
 }
 
-// SetTags sets tags for a ticket (stored as comma-separated)
+// SetTags sets tags for a ticket (stored as JSON-serialized text via GORM serializer)
 func (r *TicketRepository) SetTags(id string, tags []string) error {
-	tagStr := strings.Join(tags, ",")
-	return r.UpdateFields(id, map[string]interface{}{"tags": tagStr})
-}
-
-// GetTicketTags retrieves tags from a ticket's Tags field
-func GetTicketTags(tagsField string) []string {
-	if tagsField == "" {
-		return []string{}
-	}
-	return strings.Split(tagsField, ",")
+	return r.db.Model(&models.Ticket{}).Where("id = ?", id).Update("tags", models.StringSlice(tags)).Error
 }

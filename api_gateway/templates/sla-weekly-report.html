@@ -1,0 +1,50 @@
+{{define "content"}}
+<h2>Weekly SLA Compliance Report</h2>
+<p>Hi {{.Username}},</p>
+<p>Here is your SLA compliance summary for the week of {{if .Custom.WeekStart}}{{.Custom.WeekStart}}{{else}}N/A{{end}} – {{if .Custom.WeekEnd}}{{.Custom.WeekEnd}}{{else}}N/A{{end}}.</p>
+
+<div style="background: #f4f4f4; padding: 16px; margin: 16px 0;">
+    <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+            <td style="padding: 12px 16px; text-align: center; border-right: 1px solid #e0e0e0;">
+                <p style="margin: 0; font-size: 28px; font-weight: 600; color: {{if .Custom.ComplianceColor}}{{.Custom.ComplianceColor}}{{else}}#24a148{{end}};">{{if .Custom.ComplianceRate}}{{.Custom.ComplianceRate}}{{else}}N/A{{end}}</p>
+                <p style="margin: 4px 0 0 0; font-size: 12px; color: #6f6f6f; text-transform: uppercase;">Compliance</p>
+            </td>
+            <td style="padding: 12px 16px; text-align: center; border-right: 1px solid #e0e0e0;">
+                <p style="margin: 0; font-size: 28px; font-weight: 600; color: #161616;">{{if .Custom.TotalAlerts}}{{.Custom.TotalAlerts}}{{else}}0{{end}}</p>
+                <p style="margin: 4px 0 0 0; font-size: 12px; color: #6f6f6f; text-transform: uppercase;">Total Alerts</p>
+            </td>
+            <td style="padding: 12px 16px; text-align: center;">
+                <p style="margin: 0; font-size: 28px; font-weight: 600; color: #da1e28;">{{if .Custom.Violations}}{{.Custom.Violations}}{{else}}0{{end}}</p>
+                <p style="margin: 4px 0 0 0; font-size: 12px; color: #6f6f6f; text-transform: uppercase;">Violations</p>
+            </td>
+        </tr>
+    </table>
+</div>
+
+<div style="margin: 16px 0;">
+    <p style="font-size: 12px; font-weight: 600; color: #6f6f6f; text-transform: uppercase; letter-spacing: 0.32px; margin: 0 0 8px 0;">Performance by Severity</p>
+    <div style="background: #f4f4f4; padding: 12px 16px; margin: 4px 0;">
+        <p style="margin: 0; font-size: 14px; color: #525252;"><strong>Critical:</strong> {{if .Custom.CriticalMTTR}}{{.Custom.CriticalMTTR}}{{else}}N/A{{end}} avg response &bull; Target: 15 min</p>
+    </div>
+    <div style="background: #f4f4f4; padding: 12px 16px; margin: 4px 0;">
+        <p style="margin: 0; font-size: 14px; color: #525252;"><strong>High:</strong> {{if .Custom.HighMTTR}}{{.Custom.HighMTTR}}{{else}}N/A{{end}} avg response &bull; Target: 30 min</p>
+    </div>
+    <div style="background: #f4f4f4; padding: 12px 16px; margin: 4px 0;">
+        <p style="margin: 0; font-size: 14px; color: #525252;"><strong>Medium:</strong> {{if .Custom.MediumMTTR}}{{.Custom.MediumMTTR}}{{else}}N/A{{end}} avg response &bull; Target: 2 hours</p>
+    </div>
+</div>
+
+{{if .Custom.TrendVsLastWeek}}
+<div style="margin: 16px 0;">
+    <p style="font-size: 12px; font-weight: 600; color: #6f6f6f; text-transform: uppercase; letter-spacing: 0.32px; margin: 0 0 8px 0;">Trend vs Last Week</p>
+    <p style="font-size: 14px; color: #525252; margin: 0;">{{.Custom.TrendVsLastWeek}}</p>
+</div>
+{{end}}
+
+<a href="{{.ActionURL}}" class="button">View Full SLA Report</a>
+
+<div class="notice">
+    <p>This is an automated weekly report. You can adjust report preferences in <a href="{{.DashboardURL}}/settings" style="color: #0f62fe;">Settings</a>.</p>
+</div>
+{{end}}

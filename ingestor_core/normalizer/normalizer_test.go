@@ -3,8 +3,6 @@ package normalizer
 import (
 	"testing"
 	"time"
-
-	"github.com/ibm-live-project-interns/ingestor/shared/models"
 )
 
 func TestNormalize_SyslogEvent(t *testing.T) {

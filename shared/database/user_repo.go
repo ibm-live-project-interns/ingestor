@@ -157,7 +157,7 @@ func (r *UserRepository) GetAll(filter UserFilter) ([]models.User, int64, error)
 
 	// Apply search filter (name, email, or username)
 	if filter.Search != "" {
-		search := "%" + filter.Search + "%"
+		search := "%" + EscapeLike(filter.Search) + "%"
 		query = query.Where(
 			"username ILIKE ? OR email ILIKE ? OR first_name ILIKE ? OR last_name ILIKE ?",
 			search, search, search, search,
