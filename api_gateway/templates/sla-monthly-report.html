@@ -1,0 +1,50 @@
+{{define "content"}}
+<h2>Monthly SLA Report – {{if .Custom.MonthName}}{{.Custom.MonthName}}{{else}}N/A{{end}}</h2>
+<p>Hi {{.Username}},</p>
+<p>Here is the monthly SLA compliance summary for {{if .Custom.MonthName}}{{.Custom.MonthName}}{{else}}this month{{end}} {{if .Custom.Year}}{{.Custom.Year}}{{end}}.</p>
+
+<div style="background: #f4f4f4; padding: 16px; margin: 16px 0;">
+    <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+            <td style="width: 50%; padding: 12px 16px; text-align: center; border-right: 1px solid #e0e0e0; border-bottom: 1px solid #e0e0e0;">
+                <p style="margin: 0; font-size: 28px; font-weight: 600; color: {{if .Custom.ComplianceColor}}{{.Custom.ComplianceColor}}{{else}}#24a148{{end}};">{{if .Custom.ComplianceRate}}{{.Custom.ComplianceRate}}{{else}}N/A{{end}}</p>
+                <p style="margin: 4px 0 0 0; font-size: 12px; color: #6f6f6f; text-transform: uppercase;">Compliance</p>
+            </td>
+            <td style="width: 50%; padding: 12px 16px; text-align: center; border-bottom: 1px solid #e0e0e0;">
+                <p style="margin: 0; font-size: 28px; font-weight: 600; color: #161616;">{{if .Custom.TotalAlerts}}{{.Custom.TotalAlerts}}{{else}}0{{end}}</p>
+                <p style="margin: 4px 0 0 0; font-size: 12px; color: #6f6f6f; text-transform: uppercase;">Total Alerts</p>
+            </td>
+        </tr>
+        <tr>
+            <td style="width: 50%; padding: 12px 16px; text-align: center; border-right: 1px solid #e0e0e0;">
+                <p style="margin: 0; font-size: 28px; font-weight: 600; color: #da1e28;">{{if .Custom.Violations}}{{.Custom.Violations}}{{else}}0{{end}}</p>
+                <p style="margin: 4px 0 0 0; font-size: 12px; color: #6f6f6f; text-transform: uppercase;">Violations</p>
+            </td>
+            <td style="width: 50%; padding: 12px 16px; text-align: center;">
+                <p style="margin: 0; font-size: 28px; font-weight: 600; color: #161616;">{{if .Custom.AvgMTTR}}{{.Custom.AvgMTTR}}{{else}}N/A{{end}}</p>
+                <p style="margin: 4px 0 0 0; font-size: 12px; color: #6f6f6f; text-transform: uppercase;">Avg MTTR</p>
+            </td>
+        </tr>
+    </table>
+</div>
+
+<div style="margin: 16px 0;">
+    <p style="font-size: 12px; font-weight: 600; color: #6f6f6f; text-transform: uppercase; letter-spacing: 0.32px; margin: 0 0 8px 0;">Top Violating Devices</p>
+    {{if .Custom.TopDevice1}}<div class="feature">{{.Custom.TopDevice1}}</div>{{end}}
+    {{if .Custom.TopDevice2}}<div class="feature">{{.Custom.TopDevice2}}</div>{{end}}
+    {{if .Custom.TopDevice3}}<div class="feature">{{.Custom.TopDevice3}}</div>{{end}}
+</div>
+
+{{if .Custom.Recommendations}}
+<div style="margin: 16px 0;">
+    <p style="font-size: 12px; font-weight: 600; color: #6f6f6f; text-transform: uppercase; letter-spacing: 0.32px; margin: 0 0 8px 0;">Recommendations</p>
+    <p style="font-size: 14px; color: #525252; margin: 0;">{{.Custom.Recommendations}}</p>
+</div>
+{{end}}
+
+<a href="{{.ActionURL}}" class="button">View Full Report</a>
+
+<div class="notice">
+    <p>This is an automated monthly report. Manage your report subscriptions in <a href="{{.DashboardURL}}/settings" style="color: #0f62fe;">Settings</a>.</p>
+</div>
+{{end}}

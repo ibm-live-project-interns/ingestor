@@ -1,0 +1,29 @@
+{{define "content"}}
+<h2>Maintenance Window Completed</h2>
+<p>Hi {{.Username}},</p>
+<p>A scheduled maintenance window has been <strong>completed successfully</strong>.</p>
+
+<div style="background: #defbe6; padding: 16px; margin: 16px 0; border-left: 4px solid #24a148;">
+    <p style="margin: 0 0 8px 0; font-weight: 600; font-size: 16px; color: #161616;">{{if .Custom.WindowName}}{{.Custom.WindowName}}{{else}}Maintenance Complete{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Duration:</strong> {{if .Custom.ActualDuration}}{{.Custom.ActualDuration}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Status:</strong> {{if .Custom.CompletionStatus}}{{.Custom.CompletionStatus}}{{else}}Completed{{end}}</p>
+    {{if .Custom.AffectedDevices}}<p style="margin: 0; font-size: 14px; color: #525252;"><strong>Devices restored:</strong> {{.Custom.AffectedDevices}}</p>{{end}}
+</div>
+
+{{if .Custom.Summary}}
+<div style="margin: 16px 0;">
+    <p style="font-size: 12px; font-weight: 600; color: #6f6f6f; text-transform: uppercase; letter-spacing: 0.32px; margin: 0 0 8px 0;">Summary</p>
+    <p style="font-size: 14px; color: #525252; margin: 0;">{{.Custom.Summary}}</p>
+</div>
+{{end}}
+
+<div style="background: #f4f4f4; padding: 12px 16px; margin: 16px 0;">
+    <p style="margin: 0; font-size: 14px; color: #525252;">Alert suppression has been <strong>deactivated</strong>. Normal monitoring has resumed for all affected devices.</p>
+</div>
+
+<a href="{{.ActionURL}}" class="button">View Dashboard</a>
+
+<div class="notice">
+    <p>{{if .Custom.SuppressedAlerts}}{{.Custom.SuppressedAlerts}} alerts were suppressed during this window and are now being processed.{{else}}All suppressed alerts are now being processed.{{end}}</p>
+</div>
+{{end}}

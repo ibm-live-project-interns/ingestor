@@ -1,0 +1,26 @@
+{{define "content"}}
+<h2>Critical Administrative Action</h2>
+<p>Hi {{.Username}},</p>
+<p>A high-impact administrative action has been performed on the {{if .AppName}}{{.AppName}}{{else}}Sentrix{{end}} system that requires your awareness.</p>
+
+<div style="background: #fff1f1; padding: 16px; margin: 16px 0; border-left: 4px solid #da1e28;">
+    <p style="margin: 0 0 8px 0; font-weight: 600; font-size: 16px; color: #161616;">{{if .Custom.ActionType}}{{.Custom.ActionType}}{{else}}Admin Action{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Performed by:</strong> {{if .Custom.PerformedBy}}{{.Custom.PerformedBy}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Time:</strong> {{if .Custom.Timestamp}}{{.Custom.Timestamp}}{{else}}N/A{{end}} UTC</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Affected resource:</strong> {{if .Custom.Resource}}{{.Custom.Resource}}{{else}}N/A{{end}}</p>
+    {{if .Custom.Details}}<p style="margin: 0; font-size: 14px; color: #525252;"><strong>Details:</strong> {{.Custom.Details}}</p>{{end}}
+</div>
+
+{{if .Custom.Changes}}
+<div style="margin: 16px 0;">
+    <p style="font-size: 12px; font-weight: 600; color: #6f6f6f; text-transform: uppercase; letter-spacing: 0.32px; margin: 0 0 8px 0;">Changes Made</p>
+    <p style="font-size: 14px; color: #525252; margin: 0;">{{.Custom.Changes}}</p>
+</div>
+{{end}}
+
+<a href="{{.ActionURL}}" class="button">View Audit Log</a>
+
+<div class="notice">
+    <p>This notification is sent to all system administrators when critical actions are performed. If this action was not authorized, investigate immediately.</p>
+</div>
+{{end}}

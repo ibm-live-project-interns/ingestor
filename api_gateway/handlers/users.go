@@ -237,6 +237,8 @@ func UpdateUser(c *gin.Context) {
 	if repo == nil {
 		// Demo mode - return success with mock data
 		logger.Info("Demo mode: User %d updated", id)
+		writeAuditLog(c, "user.update", "user", fmt.Sprintf("%d", id),
+			fmt.Sprintf("User %d updated (demo mode)", id))
 		c.JSON(http.StatusOK, gin.H{
 			"message": "User updated successfully (demo mode)",
 			"user": models.UserResponse{
@@ -335,8 +337,54 @@ func UpdateUser(c *gin.Context) {
 	username, _ := c.Get("username")
 	logger.Info("User %d updated by %v", id, username)
 
-	// Fetch updated user
-	updatedUser, _ := repo.GetByID(uint(id))
+	// Record this action in the audit log for compliance tracking
+	writeAuditLog(c, "user.update", "user", fmt.Sprintf("%d", id),
+		fmt.Sprintf("User %d (%s) updated: %v", id, user.Email, updates))
+
+	// Send email notifications for role changes or deactivation (non-blocking)
+	if services.Email != nil {
+		go func() {
+			adminUsername := fmt.Sprintf("%v", username)
+			// Role changed
+			if req.Role != "" && req.Role != user.Role {
+				custom := map[string]interface{}{
+					"OldRole":   user.Role,
+					"NewRole":   req.Role,
+					"ChangedBy": adminUsername,
+					"Timestamp": time.Now().Format("Jan 2, 2006 3:04 PM"),
+					"ActionURL": fmt.Sprintf("%s/dashboard", services.Email.FrontendURL()),
+				}
+				subject := fmt.Sprintf("Your role has been updated to %s", req.Role)
+				if err := services.Email.SendNotification(user.Email, user.Username, subject, "account-role-changed", custom); err != nil {
+					logger.Warn("Failed to send role-change email to %s: %v", user.Email, err)
+				}
+			}
+			// Account deactivated
+			if req.IsActive != nil && !*req.IsActive && user.IsActive {
+				custom := map[string]interface{}{
+					"Reason":       "Deactivated by administrator",
+					"DeactivatedBy": adminUsername,
+					"Timestamp":    time.Now().Format("Jan 2, 2006 3:04 PM"),
+					"ActionURL":    fmt.Sprintf("%s/login", services.Email.FrontendURL()),
+				}
+				subject := "Your account has been deactivated"
+				if err := services.Email.SendNotification(user.Email, user.Username, subject, "account-deactivated", custom); err != nil {
+					logger.Warn("Failed to send account-deactivated email to %s: %v", user.Email, err)
+				}
+			}
+		}()
+	}
+
+	// Check error from GetByID to avoid nil pointer dereference on .ToResponse()
+	updatedUser, err := repo.GetByID(uint(id))
+	if err != nil || updatedUser == nil {
+		// The update succeeded, but re-fetch failed. Return a generic success.
+		logger.Warn("User %d updated successfully but re-fetch failed: %v", id, err)
+		c.JSON(http.StatusOK, gin.H{
+			"message": "User updated successfully",
+		})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "User updated successfully",
@@ -373,6 +421,8 @@ func DeleteUser(c *gin.Context) {
 	if repo == nil {
 		// Demo mode - return success
 		logger.Info("Demo mode: User %d deleted", id)
+		writeAuditLog(c, "user.delete", "user", fmt.Sprintf("%d", id),
+			fmt.Sprintf("User %d deleted (demo mode)", id))
 		c.JSON(http.StatusOK, gin.H{
 			"message": "User deleted successfully (demo mode)",
 			"user_id": id,
@@ -412,6 +462,27 @@ func DeleteUser(c *gin.Context) {
 	username, _ := c.Get("username")
 	logger.Info("User %d deleted by %v", id, username)
 
+	// Record deletion in the audit log for compliance tracking
+	writeAuditLog(c, "user.delete", "user", fmt.Sprintf("%d", id),
+		fmt.Sprintf("User %d (%s) deleted by %v", id, user.Email, username))
+
+	// Send account-deactivated email notification (non-blocking)
+	if services.Email != nil {
+		go func() {
+			adminUsername := fmt.Sprintf("%v", username)
+			custom := map[string]interface{}{
+				"Reason":        "Account deleted by administrator",
+				"DeactivatedBy": adminUsername,
+				"Timestamp":     time.Now().Format("Jan 2, 2006 3:04 PM"),
+				"ActionURL":     fmt.Sprintf("%s/login", services.Email.FrontendURL()),
+			}
+			subject := "Your account has been deactivated"
+			if err := services.Email.SendNotification(user.Email, user.Username, subject, "account-deactivated", custom); err != nil {
+				logger.Warn("Failed to send account-deactivated email to %s: %v", user.Email, err)
+			}
+		}()
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "User deleted successfully",
 		"user_id": id,
@@ -446,6 +517,8 @@ func ResetUserPassword(c *gin.Context) {
 	if repo == nil {
 		// Demo mode - return success with a generated temporary password
 		logger.Info("Demo mode: Password reset for user %d", id)
+		writeAuditLog(c, "user.password_reset", "user", fmt.Sprintf("%d", id),
+			fmt.Sprintf("Admin password reset for user %d (demo mode)", id))
 		c.JSON(http.StatusOK, gin.H{
 			"message":            "Password reset successfully (demo mode)",
 			"user_id":            id,
@@ -521,6 +594,29 @@ func ResetUserPassword(c *gin.Context) {
 
 	username, _ := c.Get("username")
 	logger.Info("Password reset for user %d by %v", id, username)
+
+	// Record password reset in the audit log for compliance tracking
+	writeAuditLog(c, "user.password_reset", "user", fmt.Sprintf("%d", id),
+		fmt.Sprintf("Admin password reset for user %d (%s) by %v", id, user.Email, username))
+
+	// Send password-reset-by-admin email notification (non-blocking)
+	if services.Email != nil {
+		go func() {
+			adminUsername := fmt.Sprintf("%v", username)
+			custom := map[string]interface{}{
+				"ResetBy":   adminUsername,
+				"Timestamp": time.Now().Format("Jan 2, 2006 3:04 PM"),
+				"ActionURL": fmt.Sprintf("%s/login", services.Email.FrontendURL()),
+			}
+			if isGenerated {
+				custom["TempPassword"] = newPassword
+			}
+			subject := "Your password has been reset by an administrator"
+			if err := services.Email.SendNotification(user.Email, user.Username, subject, "password-reset-by-admin", custom); err != nil {
+				logger.Warn("Failed to send password-reset-by-admin email to %s: %v", user.Email, err)
+			}
+		}()
+	}
 
 	response := gin.H{
 		"message": "Password reset successfully",

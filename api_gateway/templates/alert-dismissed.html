@@ -1,0 +1,19 @@
+{{define "content"}}
+<h2>Alert Dismissed</h2>
+<p>Hi {{.Username}},</p>
+<p>An alert has been dismissed and marked as a false positive or non-actionable event.</p>
+
+<div style="background: #f4f4f4; padding: 16px; margin: 16px 0; border-left: 4px solid #6f6f6f;">
+    <p style="margin: 0 0 8px 0; font-weight: 600; font-size: 16px; color: #161616;">{{if .Custom.AlertID}}{{.Custom.AlertID}}{{end}}: {{if .Custom.Title}}{{.Custom.Title}}{{else}}Alert{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Severity:</strong> {{if .Custom.Severity}}{{.Custom.Severity}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Device:</strong> {{if .Custom.Device}}{{.Custom.Device}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Dismissed by:</strong> {{if .Custom.DismissedBy}}{{.Custom.DismissedBy}}{{else}}Unknown{{end}}</p>
+    {{if .Custom.Reason}}<p style="margin: 0; font-size: 14px; color: #525252;"><strong>Reason:</strong> {{.Custom.Reason}}</p>{{end}}
+</div>
+
+<a href="{{.ActionURL}}" class="button">View Alert Details</a>
+
+<div class="notice">
+    <p>This alert was dismissed at {{if .Custom.Timestamp}}{{.Custom.Timestamp}}{{else}}N/A{{end}} UTC. This action has been logged for audit purposes.</p>
+</div>
+{{end}}

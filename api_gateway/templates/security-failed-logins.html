@@ -1,0 +1,23 @@
+{{define "content"}}
+<h2>Suspicious Login Activity</h2>
+<p>Hi {{.Username}},</p>
+<p>We detected multiple failed login attempts on your {{if .AppName}}{{.AppName}}{{else}}Sentrix{{end}} account.</p>
+
+<div style="background: #fff1f1; padding: 16px; margin: 16px 0; border-left: 4px solid #da1e28;">
+    <p style="margin: 0 0 8px 0; font-weight: 600; font-size: 16px; color: #161616;">Failed Login Attempts</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Number of attempts:</strong> {{if .Custom.AttemptCount}}{{.Custom.AttemptCount}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>IP address:</strong> {{if .Custom.IPAddress}}{{.Custom.IPAddress}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Time:</strong> {{if .Custom.Timestamp}}{{.Custom.Timestamp}}{{else}}N/A{{end}} UTC</p>
+    {{if .Custom.Location}}<p style="margin: 0; font-size: 14px; color: #525252;"><strong>Location:</strong> {{.Custom.Location}}</p>{{end}}
+</div>
+
+<div style="margin: 16px 0;">
+    <p style="font-size: 14px; color: #525252;"><strong>Was this you?</strong> If you were trying to log in, make sure you are using the correct credentials. If not, we recommend changing your password immediately.</p>
+</div>
+
+<a href="{{.ActionURL}}" class="button">Secure Your Account</a>
+
+<div class="notice">
+    <p>After {{if .Custom.LockoutThreshold}}{{.Custom.LockoutThreshold}}{{else}}5{{end}} failed attempts, your account will be temporarily locked for security. If you need help, contact your system administrator.</p>
+</div>
+{{end}}

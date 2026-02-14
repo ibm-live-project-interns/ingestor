@@ -1,0 +1,20 @@
+{{define "content"}}
+<h2>On-Call Override Applied</h2>
+<p>Hi {{.Username}},</p>
+<p>An on-call schedule override has been applied that affects your rotation.</p>
+
+<div style="background: #fcf4d6; padding: 16px; margin: 16px 0; border-left: 4px solid #f1c21b;">
+    <p style="margin: 0 0 8px 0; font-weight: 600; font-size: 16px; color: #161616;">Schedule Override</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Override period:</strong> {{if .Custom.StartTime}}{{.Custom.StartTime}}{{else}}N/A{{end}} – {{if .Custom.EndTime}}{{.Custom.EndTime}}{{else}}N/A{{end}} UTC</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Original on-call:</strong> {{if .Custom.OriginalEngineer}}{{.Custom.OriginalEngineer}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Replacement:</strong> {{if .Custom.ReplacementEngineer}}{{.Custom.ReplacementEngineer}}{{else}}N/A{{end}}</p>
+    {{if .Custom.Reason}}<p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Reason:</strong> {{.Custom.Reason}}</p>{{end}}
+    <p style="margin: 0; font-size: 14px; color: #525252;"><strong>Approved by:</strong> {{if .Custom.ApprovedBy}}{{.Custom.ApprovedBy}}{{else}}N/A{{end}}</p>
+</div>
+
+<a href="{{.ActionURL}}" class="button">View Schedule</a>
+
+<div class="notice">
+    <p>The regular rotation will resume automatically after the override period ends.</p>
+</div>
+{{end}}

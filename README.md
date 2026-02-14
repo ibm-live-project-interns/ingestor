@@ -1,78 +1,82 @@
 # Ingestor Services
 
-Backend microservices for the NOC Dashboard - handles data ingestion, event routing, and AI processing.
+Backend microservices for Sentrix. Handles API serving, data ingestion, event routing, and AI processing.
 
 ## Architecture
 
 ```
 ┌─────────────────┐      ┌─────────────────┐     ┌─────────────────┐
-│   Datasource    │────▶│  Ingestor Core  │────▶│  Event Router   │
+│   Datasource    │────>│  Ingestor Core  │────>│  Event Router   │
 │   (External)    │      │     :8001       │     │     :8082       │
 └─────────────────┘      └─────────────────┘     └────────┬────────┘
                                                           │
                          ┌────────────────────────────────┼────────────────┐
                          │                                │                │
-                         ▼                                ▼                ▼
+                         v                                v                v
                   ┌─────────────┐                 ┌─────────────┐  ┌─────────────┐
-                  │ Agents API  │                 │ API Gateway │  │   Kafka     │
+                  │ AI Core     │                 │ API Gateway │  │   Kafka     │
                   │   :9000     │                 │   :8080     │  │   :9092     │
                   │  (watsonx)  │                 │  (Direct)   │  │             │
                   └─────────────┘                 └──────┬──────┘  └─────────────┘
                                                          │
                                                          │ Proxied by nginx
-                                                         ▼
+                                                         v
                                                   ┌─────────────┐
                                                   │ UI (nginx)  │
                                                   │   :3000     │
                                                   └─────────────┘
 ```
 
-**Note:** The UI at port 3000 uses nginx to proxy API requests to the API Gateway at port 8080.
-
-## Shared Package
-
-All services use a common `shared/` package for:
-- **Models** (`shared/models/event.go`) - `Event`, `RoutedEvent` structs
-- **Constants** (`shared/constants/`) - Severity levels, event types
-- **Config** (`shared/config/env.go`) - `GetEnv()` helper
-
-This eliminates code duplication across services.
+The UI at port 3000 uses nginx to proxy API requests to the API Gateway at port 8080.
 
 ## Services
 
 ### 1. API Gateway (Port 8080)
 
-REST API serving the UI with authentication and authorization.
+The primary backend service. REST API with JWT auth, RBAC, and 101 registered routes.
 
-**Features:**
-- JWT-based authentication
-- CORS configuration
-- Rate limiting
-- Security headers
+**Tech:** Go 1.24 + Gin 1.11 + GORM 1.31 + PostgreSQL 15
 
-**Key Endpoints:**
+**Handler files** (18 files in `api_gateway/handlers/`):
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/v1/login` | User authentication |
-| GET | `/api/v1/alerts` | List all alerts |
-| GET | `/api/v1/alerts/:id` | Get alert details |
-| POST | `/api/v1/tickets` | Create ticket |
-| POST | `/api/internal/events` | Internal API (no auth) for service-to-service |
-| GET | `/api/v1/health` | Health check |
+| File | Description |
+|------|-------------|
+| `alerts.go` | Alert CRUD, summary, severity distribution, time series, acknowledge, dismiss, resolve |
+| `audit.go` | Audit log listing with filters, pagination |
+| `auth.go` | Login (JWT + demo mode), register, logout, Google OAuth |
+| `common.go` | Dashboard summary/metrics/charts, devices, AI metrics/insights, trends, reports |
+| `configuration.go` | Threshold rules, notification channels, escalation policies, maintenance windows CRUD |
+| `device_groups.go` | Device group CRUD, assign/remove devices |
+| `global_settings.go` | Global settings GET/PUT (maintenance mode, auto-resolve, AI correlation) |
+| `health_extended.go` | Service status endpoint with real service health checks |
+| `oncall.go` | On-call current, schedule (demo mode) |
+| `profile.go` | Self-service profile update, password change |
+| `runbooks.go` | Runbook CRUD with RBAC, 10 demo runbooks, search/category filter |
+| `service_status.go` | Docker container status, container logs |
+| `settings.go` | User settings CRUD |
+| `sla.go` | SLA reports, violations, trend data |
+| `tickets.go` | Ticket CRUD, stats, comments, delete |
+| `topology.go` | Network topology nodes + edges (demo mode) |
+| `users.go` | User management CRUD, reset-password (sysadmin) |
+| `email_test_handler.go` | Email delivery test |
+
+**Route groups** (from `main.go`):
+- **Internal** (`/api/internal/`) - Service-to-service, API key auth: events
+- **Public** (`/api/v1/`) - No auth: login, register, logout, health, Google OAuth
+- **Protected** (`/api/v1/`) - JWT auth: alerts, tickets, devices, AI, trends, dashboard, reports, configuration, runbooks, device-groups, global-settings, users, profile, SLA, audit, on-call, topology, service-status, settings
 
 ### 2. Ingestor Core (Port 8001)
 
-Central ingestion point for all network events.
+Central ingestion point for network events.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/ingest/event` | Receive normalized events |
+| POST | `/ingest/event` | Receive normalized events from Datasource |
 | GET | `/health` | Health check |
 
 ### 3. Event Router (Port 8082)
 
-Routes events to appropriate downstream services based on event type.
+Routes events by severity to downstream services.
 
 **Configuration** (`config.json`):
 ```json
@@ -85,7 +89,7 @@ Routes events to appropriate downstream services based on event type.
 }
 ```
 
-**Note:** Critical and high severity events are routed to the AI service for Watson analysis. Medium, low, and info events go directly to the API Gateway.
+Critical/high -> AI Core for Watson analysis. Medium/low/info -> API Gateway directly.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -94,44 +98,94 @@ Routes events to appropriate downstream services based on event type.
 
 ### 4. Agents API (Port 9000)
 
-IBM watsonx AI integration for intelligent event analysis.
+Minimal stub in `agents_api/`. The full Watson AI integration lives in the separate [ai-core](../ai-core/) service.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | `/events` | Process event with AI |
 | GET | `/health` | Health check |
 
-**Note:** The `agents_api/` directory in this repo contains a minimal stub. The full Watson AI integration with IAM token management, API key rotation, and prompt engineering lives in the separate [ai-core](https://github.com/ibm-live-project-interns/ai-core) repository, which is the service used in Docker deployment.
+## Shared Package (`shared/`)
+
+Common code used by all ingestor services.
+
+```
+shared/
+├── config/         # GetEnv() helper
+├── constants/      # Severity levels, event types
+├── database/       # GORM repositories
+│   ├── database.go       # DB connection, auto-migration
+│   ├── alert_repo.go     # Alert CRUD, filtering, stats
+│   ├── audit_repo.go     # Audit log with search/filter/stats
+│   ├── config_repo.go    # Configuration tables CRUD
+│   ├── ticket_repo.go    # Ticket CRUD, real MTTR computation
+│   └── user_repo.go      # User CRUD, GetAll, SoftDelete
+├── errors/         # Structured error types
+├── httpclient/     # HTTP client utilities
+├── logger/         # Structured logging
+├── middleware/     # Gin middleware
+│   ├── auth.go           # JWT validation
+│   ├── headers.go        # Security headers
+│   ├── logger.go         # Request logging
+│   ├── ratelimit.go      # Rate limiting
+│   └── security.go       # CORS
+├── models/         # GORM models
+│   ├── event.go          # Event, RoutedEvent (pipeline models)
+│   ├── alert.go          # Alert (DB model)
+│   ├── user.go           # User, Session (DB models)
+│   ├── ticket.go         # Ticket, Comment (DB models)
+│   ├── configuration.go  # ThresholdRule, NotificationChannel, EscalationPolicy, MaintenanceWindow
+│   └── audit.go          # AuditLog with JSONB
+├── rbac/           # Role-based access control
+│   └── permissions.go    # 5 roles, 13 permissions
+└── routing/        # Event routing utilities
+```
+
+## Database (PostgreSQL 15)
+
+17 tables defined in `postgres-init/init.sql`:
+
+| Table | Purpose |
+|-------|---------|
+| `users` | User accounts with roles |
+| `sessions` | Active JWT sessions |
+| `alerts` | Network alerts with AI analysis |
+| `alert_history` | Historical alert data |
+| `devices` | Network device inventory |
+| `tickets` | Issue tracking |
+| `ticket_comments` | Ticket comments |
+| `threshold_rules` | Alert threshold configuration |
+| `notification_channels` | Notification endpoints |
+| `escalation_policies` | Alert escalation rules |
+| `maintenance_windows` | Scheduled maintenance |
+| `ingestion_data` | Raw ingested events |
+| `ai_results` | AI analysis results |
+| `ai_metrics` | AI performance metrics |
+| `api_keys` | Service-to-service auth |
+| `audit_logs` | User action audit trail |
+| `runbooks` | Knowledge base articles |
 
 ## Quick Start
 
-### Run with Docker (Recommended)
-
-The easiest way is to use docker-compose from the [ui repository](https://github.com/ibm-live-project-interns/ui):
+### Docker (Recommended)
 
 ```bash
-# Clone both repos side-by-side
-git clone https://github.com/ibm-live-project-interns/ui.git
-git clone https://github.com/ibm-live-project-interns/ingestor.git
-
-# Start all services
-cd ui
+cd infra/prod
 docker compose up -d --build
 ```
 
-### Run Locally
+### Local Development
 
 ```bash
 # Start each service in separate terminals
 cd api_gateway && go run main.go
 cd ingestor_core && go run main.go
 cd event_router && go run main.go
-cd agents_api && go run main.go
 ```
 
-## Environment Variables
+### Environment Variables
 
-Create a `.env` file (see `.env.example`):
+Create `.env` file:
 
 ```bash
 # API Gateway
@@ -149,34 +203,30 @@ POSTGRES_DB=noc_alerts
 # Kafka
 KAFKA_BROKERS=localhost:9092
 ```
-### Configuration Notes
 
-- All environment variables are read using the shared `config.GetEnv()` helper
-- Defaults are provided to allow local development without a `.env`
-- Docker Compose injects environment variables automatically
+All env vars use the shared `config.GetEnv()` helper with sensible defaults.
 
-For local development:
+## Authentication
+
+**Demo mode** (no DB): Any non-empty email/password works, JWT generated in-memory. Email patterns map to roles:
+- `*admin*` or `*sysadmin*` -> sysadmin
+- `*sre*` -> sre
+- `*netadmin*` -> network-admin
+- `*senior*` -> senior-eng
+- Default -> network-ops
+
+**Production** (with DB): Validates against `users` table with bcrypt password hashing.
+
+Default admin: `admin@admin.com` / `admin123` (role: `sysadmin`)
 
 ```bash
-cp .env.example .env
-```
-
-## API Authentication
-
-A default admin user is seeded on first run: `admin@admin.com` / `admin123`
-
-```bash
-# Login (Direct API access on port 8080)
 curl -X POST http://localhost:8080/api/v1/login \
   -H "Content-Type: application/json" \
   -d '{"email": "admin@admin.com", "password": "admin123"}'
 
-# Use token
 curl http://localhost:8080/api/v1/alerts \
-  -H "Authorization: Bearer <your-token>"
+  -H "Authorization: Bearer <token>"
 ```
-
-**Note:** When using the web UI at `http://localhost:3000`, nginx proxies API requests from port 3000 to port 8080. You can change the password or create additional users from Settings.
 
 ## Health Checks
 
@@ -184,28 +234,5 @@ curl http://localhost:8080/api/v1/alerts \
 curl http://localhost:8080/api/v1/health  # API Gateway
 curl http://localhost:8001/health          # Ingestor Core
 curl http://localhost:8082/health          # Event Router
-curl http://localhost:9000/health          # Agents API
+curl http://localhost:9000/health          # Agents API (ai-core)
 ```
-
-## Documentation
-
-Full documentation is in the [docs repository](https://github.com/ibm-live-project-interns/docs):
-
-- [API Reference](https://github.com/ibm-live-project-interns/docs/blob/main/docs/API.md) - Complete REST API docs
-- [Architecture](https://github.com/ibm-live-project-interns/docs/blob/main/docs/ARCHITECTURE.md) - System design
-- [Environment Config](https://github.com/ibm-live-project-interns/docs/blob/main/docs/ENVIRONMENT.md) - All variables
-- [Deployment](https://github.com/ibm-live-project-interns/docs/blob/main/docs/DEPLOYMENT.md) - Deployment guide
-
-**Offline Access:** If you have all repos cloned side-by-side, docs are at `../docs/docs/`
-
-## Related Repositories
-
-| Repository | Description |
-|------------|-------------|
-| [docs](https://github.com/ibm-live-project-interns/docs) | Documentation |
-| [ui](https://github.com/ibm-live-project-interns/ui) | Frontend dashboard |
-| [datasource](https://github.com/ibm-live-project-interns/datasource) | Data simulation |
-| [infra](https://github.com/ibm-live-project-interns/infra) | Infrastructure |
-
-
-

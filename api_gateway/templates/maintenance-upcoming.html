@@ -1,0 +1,30 @@
+{{define "content"}}
+<h2>Upcoming Maintenance Window</h2>
+<p>Hi {{.Username}},</p>
+<p>A scheduled maintenance window is approaching. Please be aware of the following details:</p>
+
+<div style="background: #fcf4d6; padding: 16px; margin: 16px 0; border-left: 4px solid #f1c21b;">
+    <p style="margin: 0 0 8px 0; font-weight: 600; font-size: 16px; color: #161616;">{{if .Custom.WindowName}}{{.Custom.WindowName}}{{else}}Scheduled Maintenance{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Start:</strong> {{if .Custom.StartTime}}{{.Custom.StartTime}}{{else}}N/A{{end}} UTC</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>End:</strong> {{if .Custom.EndTime}}{{.Custom.EndTime}}{{else}}N/A{{end}} UTC</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Duration:</strong> {{if .Custom.Duration}}{{.Custom.Duration}}{{else}}N/A{{end}}</p>
+    {{if .Custom.AffectedDevices}}<p style="margin: 0; font-size: 14px; color: #525252;"><strong>Affected devices:</strong> {{.Custom.AffectedDevices}}</p>{{end}}
+</div>
+
+{{if .Custom.Description}}
+<div style="margin: 16px 0;">
+    <p style="font-size: 12px; font-weight: 600; color: #6f6f6f; text-transform: uppercase; letter-spacing: 0.32px; margin: 0 0 8px 0;">Description</p>
+    <p style="font-size: 14px; color: #525252; margin: 0;">{{.Custom.Description}}</p>
+</div>
+{{end}}
+
+<div style="background: #f4f4f4; padding: 12px 16px; margin: 16px 0;">
+    <p style="margin: 0; font-size: 14px; color: #525252;"><strong>Contact:</strong> {{if .Custom.ContactPerson}}{{.Custom.ContactPerson}}{{else}}On-call engineer{{end}}</p>
+</div>
+
+<a href="{{.ActionURL}}" class="button">View Maintenance Schedule</a>
+
+<div class="notice">
+    <p>Alerts from affected devices will be suppressed during this maintenance window. This is a {{if .Custom.ReminderType}}{{.Custom.ReminderType}}{{else}}reminder{{end}} notification.</p>
+</div>
+{{end}}

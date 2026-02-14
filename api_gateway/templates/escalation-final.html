@@ -1,0 +1,28 @@
+{{define "content"}}
+<h2 style="color: #da1e28;">FINAL ESCALATION – Immediate Action Required</h2>
+<p>Hi {{.Username}},</p>
+<p>An alert has reached the <strong>final escalation level</strong>. All previous escalation levels have been exhausted without resolution.</p>
+
+<div style="background: #fff1f1; padding: 16px; margin: 16px 0; border-left: 4px solid #da1e28;">
+    <p style="margin: 0 0 8px 0; font-weight: 600; font-size: 16px; color: #da1e28;">{{if .Custom.AlertID}}{{.Custom.AlertID}}{{end}}: {{if .Custom.Title}}{{.Custom.Title}}{{else}}CRITICAL ALERT{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Severity:</strong> {{if .Custom.Severity}}{{.Custom.Severity}}{{else}}critical{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Device:</strong> {{if .Custom.Device}}{{.Custom.Device}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #da1e28;"><strong>Total time unresolved:</strong> {{if .Custom.TimeElapsed}}{{.Custom.TimeElapsed}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0; font-size: 14px; color: #525252;"><strong>Escalation levels passed:</strong> {{if .Custom.LevelsPassed}}{{.Custom.LevelsPassed}}{{else}}All{{end}}</p>
+</div>
+
+<div style="background: #fff1f1; padding: 12px 16px; margin: 16px 0;">
+    <p style="margin: 0; font-size: 14px; color: #da1e28; font-weight: 600;">This is the highest escalation level. No further automatic escalations will occur. Manual intervention is required immediately.</p>
+</div>
+
+<div style="background: #f4f4f4; padding: 12px 16px; margin: 16px 0;">
+    <p style="margin: 0; font-size: 14px; color: #525252;"><strong>Escalation policy:</strong> {{if .Custom.PolicyName}}{{.Custom.PolicyName}}{{else}}Default{{end}}</p>
+    <p style="margin: 4px 0 0 0; font-size: 14px; color: #525252;"><strong>Escalation history:</strong> {{if .Custom.EscalationHistory}}{{.Custom.EscalationHistory}}{{else}}N/A{{end}}</p>
+</div>
+
+<a href="{{.ActionURL}}" class="button" style="background: #da1e28;">Take Immediate Action</a>
+
+<div class="notice">
+    <p>This alert has been flagged for executive review. All sysadmins and senior engineers have been notified.</p>
+</div>
+{{end}}

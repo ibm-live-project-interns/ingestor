@@ -1,7 +1,7 @@
 {{define "content"}}
 <h2>Alert Notification</h2>
 <p>Hi {{.Username}},</p>
-<p>A new <strong>{{if .Custom.Severity}}{{.Custom.Severity}}{{else}}unknown{{end}}</strong> severity alert has been detected in your NOC Dashboard.</p>
+<p>A new <strong>{{if .Custom.Severity}}{{.Custom.Severity}}{{else}}unknown{{end}}</strong> severity alert has been detected in your {{if .AppName}}{{.AppName}}{{else}}Sentrix{{end}} dashboard.</p>
 
 <div style="background: #f4f4f4; padding: 16px; margin: 16px 0; border-left: 4px solid {{if eq (index .Custom "SeverityColor") ""}}#0f62fe{{else}}{{.Custom.SeverityColor}}{{end}};">
     <p style="margin: 0 0 8px 0; font-weight: 600; font-size: 16px; color: #161616;">{{if .Custom.Title}}{{.Custom.Title}}{{else}}New Alert{{end}}</p>

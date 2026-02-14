@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -49,6 +50,9 @@ type CreateRunbookRequest struct {
 // ==========================================
 // Demo Data
 // ==========================================
+
+// runbookMu protects demoRunbooks and nextDemoRunbookID from concurrent access.
+var runbookMu sync.RWMutex
 
 // nextDemoRunbookID tracks the next ID to assign in demo mode.
 var nextDemoRunbookID = 11
@@ -274,10 +278,15 @@ func getDemoRunbooks() []Runbook {
 }
 
 // demoRunbooks holds the in-memory runbook list for demo mode mutations.
+// All access must be protected by runbookMu.
 var demoRunbooks []Runbook
 
-// initDemoRunbooks ensures the demo data is initialized exactly once.
-func initDemoRunbooks() []Runbook {
+// initDemoRunbooksLocked ensures the demo data is initialized.
+// Caller MUST hold runbookMu (at least read lock) before calling.
+// Returns the current slice. If the slice was nil it initializes it,
+// but that requires a write lock — so callers that may trigger init
+// should hold a write lock.
+func initDemoRunbooksLocked() []Runbook {
 	if demoRunbooks == nil {
 		demoRunbooks = getDemoRunbooks()
 	}
@@ -337,11 +346,18 @@ func canManageRunbooks(c *gin.Context) bool {
 // GET /api/v1/runbooks
 func GetRunbooks(c *gin.Context) {
 	// Demo mode only (no database table exists)
-	runbooks := initDemoRunbooks()
-	logger.Info("Demo mode: returning runbooks (count=%d)", len(runbooks))
+	// Use write lock because initDemoRunbooksLocked may initialize the slice.
+	runbookMu.Lock()
+	runbooks := initDemoRunbooksLocked()
+	// Take a snapshot copy so we can release the lock before doing I/O.
+	snapshot := make([]Runbook, len(runbooks))
+	copy(snapshot, runbooks)
+	runbookMu.Unlock()
+
+	logger.Info("Demo mode: returning runbooks (count=%d)", len(snapshot))
 
 	// Apply filters
-	filtered := filterRunbooks(runbooks, c)
+	filtered := filterRunbooks(snapshot, c)
 
 	// Apply pagination
 	limit := 25
@@ -366,7 +382,7 @@ func GetRunbooks(c *gin.Context) {
 		filtered = filtered[offset : offset+limit]
 	}
 
-	stats := getDemoRunbookStats(runbooks)
+	stats := getDemoRunbookStats(snapshot)
 
 	c.JSON(http.StatusOK, gin.H{
 		"runbooks": filtered,
@@ -386,16 +402,26 @@ func GetRunbookByID(c *gin.Context) {
 		return
 	}
 
-	runbooks := initDemoRunbooks()
+	runbookMu.Lock()
+	runbooks := initDemoRunbooksLocked()
+	var found *Runbook
 	for i := range runbooks {
 		if runbooks[i].ID == id {
 			// Increment usage count on view
 			runbooks[i].UsageCount++
-			c.JSON(http.StatusOK, gin.H{
-				"runbook": runbooks[i],
-			})
-			return
+			// Copy so we can release the lock before writing the response.
+			rb := runbooks[i]
+			found = &rb
+			break
 		}
+	}
+	runbookMu.Unlock()
+
+	if found != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"runbook": found,
+		})
+		return
 	}
 
 	apiErr := errors.NewNotFound("runbook")
@@ -471,6 +497,8 @@ func CreateRunbook(c *gin.Context) {
 	}
 
 	now := time.Now()
+
+	runbookMu.Lock()
 	newRunbook := Runbook{
 		ID:                nextDemoRunbookID,
 		Title:             strings.TrimSpace(req.Title),
@@ -485,8 +513,9 @@ func CreateRunbook(c *gin.Context) {
 	}
 	nextDemoRunbookID++
 
-	runbooks := initDemoRunbooks()
+	runbooks := initDemoRunbooksLocked()
 	demoRunbooks = append(runbooks, newRunbook)
+	runbookMu.Unlock()
 
 	logger.Info("Demo mode: created runbook id=%d title=%q", newRunbook.ID, newRunbook.Title)
 
@@ -554,7 +583,9 @@ func UpdateRunbook(c *gin.Context) {
 		return
 	}
 
-	runbooks := initDemoRunbooks()
+	runbookMu.Lock()
+	runbooks := initDemoRunbooksLocked()
+	var updated *Runbook
 	for i := range runbooks {
 		if runbooks[i].ID == id {
 			// Build steps
@@ -573,14 +604,20 @@ func UpdateRunbook(c *gin.Context) {
 			runbooks[i].RelatedAlertTypes = req.RelatedAlertTypes
 			runbooks[i].LastUpdated = time.Now()
 
-			logger.Info("Demo mode: updated runbook id=%d title=%q", id, runbooks[i].Title)
-
-			c.JSON(http.StatusOK, gin.H{
-				"runbook": runbooks[i],
-				"message": "Runbook updated successfully",
-			})
-			return
+			rb := runbooks[i]
+			updated = &rb
+			break
 		}
+	}
+	runbookMu.Unlock()
+
+	if updated != nil {
+		logger.Info("Demo mode: updated runbook id=%d title=%q", id, updated.Title)
+		c.JSON(http.StatusOK, gin.H{
+			"runbook": updated,
+			"message": "Runbook updated successfully",
+		})
+		return
 	}
 
 	apiErr := errors.NewNotFound("runbook")
@@ -605,19 +642,25 @@ func DeleteRunbook(c *gin.Context) {
 		return
 	}
 
-	runbooks := initDemoRunbooks()
+	runbookMu.Lock()
+	runbooks := initDemoRunbooksLocked()
+	found := false
 	for i := range runbooks {
 		if runbooks[i].ID == id {
 			// Remove from slice
 			demoRunbooks = append(runbooks[:i], runbooks[i+1:]...)
-
-			logger.Info("Demo mode: deleted runbook id=%d", id)
-
-			c.JSON(http.StatusOK, gin.H{
-				"message": "Runbook deleted successfully",
-			})
-			return
+			found = true
+			break
 		}
+	}
+	runbookMu.Unlock()
+
+	if found {
+		logger.Info("Demo mode: deleted runbook id=%d", id)
+		c.JSON(http.StatusOK, gin.H{
+			"message": "Runbook deleted successfully",
+		})
+		return
 	}
 
 	apiErr := errors.NewNotFound("runbook")

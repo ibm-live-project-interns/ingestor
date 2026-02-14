@@ -1,0 +1,48 @@
+{{define "content"}}
+<h2>Daily Operations Digest</h2>
+<p>Hi {{.Username}},</p>
+<p>Here is your daily operations summary for {{if .Custom.Date}}{{.Custom.Date}}{{else}}today{{end}}.</p>
+
+<div style="background: #f4f4f4; padding: 16px; margin: 16px 0;">
+    <table style="width: 100%; border-collapse: collapse;">
+        <tr>
+            <td style="padding: 12px 8px; text-align: center; border-right: 1px solid #e0e0e0;">
+                <p style="margin: 0; font-size: 28px; font-weight: 600; color: #161616;">{{if .Custom.TotalAlerts}}{{.Custom.TotalAlerts}}{{else}}0{{end}}</p>
+                <p style="margin: 4px 0 0 0; font-size: 11px; color: #6f6f6f; text-transform: uppercase;">Alerts</p>
+            </td>
+            <td style="padding: 12px 8px; text-align: center; border-right: 1px solid #e0e0e0;">
+                <p style="margin: 0; font-size: 28px; font-weight: 600; color: #da1e28;">{{if .Custom.CriticalAlerts}}{{.Custom.CriticalAlerts}}{{else}}0{{end}}</p>
+                <p style="margin: 4px 0 0 0; font-size: 11px; color: #6f6f6f; text-transform: uppercase;">Critical</p>
+            </td>
+            <td style="padding: 12px 8px; text-align: center; border-right: 1px solid #e0e0e0;">
+                <p style="margin: 0; font-size: 28px; font-weight: 600; color: #24a148;">{{if .Custom.ResolvedAlerts}}{{.Custom.ResolvedAlerts}}{{else}}0{{end}}</p>
+                <p style="margin: 4px 0 0 0; font-size: 11px; color: #6f6f6f; text-transform: uppercase;">Resolved</p>
+            </td>
+            <td style="padding: 12px 8px; text-align: center;">
+                <p style="margin: 0; font-size: 28px; font-weight: 600; color: #161616;">{{if .Custom.MTTR}}{{.Custom.MTTR}}{{else}}N/A{{end}}</p>
+                <p style="margin: 4px 0 0 0; font-size: 11px; color: #6f6f6f; text-transform: uppercase;">Avg MTTR</p>
+            </td>
+        </tr>
+    </table>
+</div>
+
+<div style="margin: 16px 0;">
+    <p style="font-size: 12px; font-weight: 600; color: #6f6f6f; text-transform: uppercase; letter-spacing: 0.32px; margin: 0 0 8px 0;">Ticket Activity</p>
+    <div style="background: #f4f4f4; padding: 12px 16px; margin: 4px 0;">
+        <p style="margin: 0; font-size: 14px; color: #525252;">Opened: <strong>{{if .Custom.TicketsOpened}}{{.Custom.TicketsOpened}}{{else}}0{{end}}</strong> &bull; Closed: <strong>{{if .Custom.TicketsClosed}}{{.Custom.TicketsClosed}}{{else}}0{{end}}</strong> &bull; In Progress: <strong>{{if .Custom.TicketsInProgress}}{{.Custom.TicketsInProgress}}{{else}}0{{end}}</strong></p>
+    </div>
+</div>
+
+{{if .Custom.TopNoisyDevices}}
+<div style="margin: 16px 0;">
+    <p style="font-size: 12px; font-weight: 600; color: #6f6f6f; text-transform: uppercase; letter-spacing: 0.32px; margin: 0 0 8px 0;">Top Noisy Devices</p>
+    <p style="font-size: 14px; color: #525252; margin: 0;">{{.Custom.TopNoisyDevices}}</p>
+</div>
+{{end}}
+
+<a href="{{.ActionURL}}" class="button">Open Dashboard</a>
+
+<div class="notice">
+    <p>This is your daily digest delivered at 06:00 UTC. Manage your digest preferences in <a href="{{.DashboardURL}}/settings" style="color: #0f62fe;">Settings</a>.</p>
+</div>
+{{end}}

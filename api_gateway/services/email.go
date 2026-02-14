@@ -61,14 +61,14 @@ func InitEmailService() error {
 	username := config.GetEnv("SMTP_USERNAME", "")
 	password := config.GetEnv("SMTP_PASSWORD", "")
 	fromAddr := config.GetEnv("SMTP_FROM", username)
-	fromName := config.GetEnv("SMTP_FROM_NAME", "NOC Alert System")
+	fromName := config.GetEnv("SMTP_FROM_NAME", "Sentrix")
 
 	if username == "" || password == "" {
 		return fmt.Errorf("SMTP_USERNAME and SMTP_PASSWORD are required")
 	}
 
 	frontendURL := config.GetEnv("FRONTEND_URL", "http://localhost:5173")
-	appName := config.GetEnv("APP_NAME", "NOC Dashboard")
+	appName := config.GetEnv("APP_NAME", "Sentrix")
 
 	// Create mail client with best practices from go-mail docs
 	client, err := mail.NewClient(
@@ -130,10 +130,50 @@ func loadTemplates(dir string) (map[string]*template.Template, error) {
 	basePath := filepath.Join(dir, "base.html")
 
 	templateFiles := []string{
+		// Existing templates
 		"verify-email.html",
 		"reset-password.html",
 		"welcome.html",
 		"alert-notification.html",
+		"ticket-notification.html",
+		// Alert lifecycle
+		"alert-acknowledged.html",
+		"alert-resolved.html",
+		"alert-dismissed.html",
+		"alert-escalated.html",
+		// User management
+		"user-created-by-admin.html",
+		"account-role-changed.html",
+		"account-deactivated.html",
+		"password-reset-by-admin.html",
+		// SLA
+		"sla-violation.html",
+		"sla-weekly-report.html",
+		"sla-monthly-report.html",
+		// Maintenance
+		"maintenance-upcoming.html",
+		"maintenance-started.html",
+		"maintenance-completed.html",
+		// Escalation
+		"escalation-triggered.html",
+		"escalation-final.html",
+		// On-call
+		"oncall-rotation-reminder.html",
+		"oncall-override-applied.html",
+		"oncall-missed-alert.html",
+		// Security
+		"security-failed-logins.html",
+		"security-account-locked.html",
+		"security-new-device-login.html",
+		"security-critical-admin-action.html",
+		// Reports / digests
+		"daily-operations-digest.html",
+		"weekly-incident-review.html",
+		"monthly-executive-summary.html",
+		// Collaboration
+		"ticket-sla-warning.html",
+		"runbook-published.html",
+		"ticket-mention.html",
 	}
 
 	for _, filename := range templateFiles {
@@ -265,6 +305,83 @@ func (e *EmailService) SendAlertNotification(toEmail, username string, alert Ale
 
 	subject := fmt.Sprintf("[%s] %s – %s", alert.Severity, alert.Device, alert.Title)
 	return e.sendTemplate(toEmail, subject, "alert-notification", data)
+}
+
+// TicketEmailData holds the details needed for a ticket notification email
+type TicketEmailData struct {
+	TicketID      string
+	Title         string
+	Priority      string
+	Status        string
+	Assignee      string
+	Category      string
+	EventType     string // "Created", "Assigned", "Updated", "Commented"
+	EventMessage  string // Human-readable event description
+	Comment       string // Comment content (optional)
+	CommentAuthor string // Comment author (optional)
+}
+
+// SendTicketNotification sends a ticket notification email to the given user
+func (e *EmailService) SendTicketNotification(toEmail, username string, ticket TicketEmailData) error {
+	priorityColors := map[string]string{
+		"critical": "#da1e28",
+		"high":     "#ff832b",
+		"medium":   "#f1c21b",
+		"low":      "#24a148",
+	}
+	color := priorityColors[ticket.Priority]
+	if color == "" {
+		color = "#0f62fe"
+	}
+
+	data := e.baseEmailData()
+	data.Username = username
+	data.ActionURL = fmt.Sprintf("%s/tickets/%s", e.frontendURL, ticket.TicketID)
+	data.Custom = map[string]interface{}{
+		"TicketID":      ticket.TicketID,
+		"Title":         ticket.Title,
+		"Priority":      ticket.Priority,
+		"PriorityColor": color,
+		"Status":        ticket.Status,
+		"Assignee":      ticket.Assignee,
+		"Category":      ticket.Category,
+		"EventType":     ticket.EventType,
+		"EventMessage":  ticket.EventMessage,
+		"Comment":       ticket.Comment,
+		"CommentAuthor": ticket.CommentAuthor,
+	}
+
+	subject := fmt.Sprintf("[Ticket %s] %s – %s", ticket.EventType, ticket.TicketID, ticket.Title)
+	return e.sendTemplate(toEmail, subject, "ticket-notification", data)
+}
+
+// SendNotification is a generic method for sending any template-based notification.
+// It accepts a template name, subject, recipient, and custom data map.
+func (e *EmailService) SendNotification(toEmail, username, subject, templateName string, custom map[string]interface{}) error {
+	data := e.baseEmailData()
+	data.Username = username
+	if actionURL, ok := custom["ActionURL"].(string); ok {
+		data.ActionURL = actionURL
+	} else {
+		data.ActionURL = e.dashboardURL
+	}
+	data.Custom = custom
+	return e.sendTemplate(toEmail, subject, templateName, data)
+}
+
+// BaseEmailData returns common email data (public, for test handler)
+func (e *EmailService) BaseEmailData() EmailData {
+	return e.baseEmailData()
+}
+
+// SendTemplatePublic is a public wrapper around sendTemplate for test/admin use
+func (e *EmailService) SendTemplatePublic(toEmail, subject, templateName string, data EmailData) error {
+	return e.sendTemplate(toEmail, subject, templateName, data)
+}
+
+// FrontendURL returns the configured frontend URL
+func (e *EmailService) FrontendURL() string {
+	return e.frontendURL
 }
 
 // send is the internal method to send emails

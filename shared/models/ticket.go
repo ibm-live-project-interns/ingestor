@@ -6,6 +6,9 @@ import (
 	"gorm.io/gorm"
 )
 
+// StringSlice is a []string type that GORM can serialize to/from JSON text in the database.
+type StringSlice []string
+
 // Ticket represents a support ticket stored in the database
 type Ticket struct {
 	ID        string         `gorm:"primaryKey;size:50" json:"id"`
@@ -26,14 +29,15 @@ type Ticket struct {
 
 	// Related entities
 	AlertID  *string `gorm:"size:50;index" json:"alert_id,omitempty"`
-	DeviceID *string `gorm:"size:100;index" json:"device_id,omitempty"`
+	DeviceID   *string `gorm:"size:100;index" json:"device_id,omitempty"`
+	DeviceName string  `gorm:"size:100" json:"device_name,omitempty"`
 
 	// Timing
 	DueDate    *time.Time `json:"due_date,omitempty"`
 	ResolvedAt *time.Time `json:"resolved_at,omitempty"`
 
-	// Tags - ignored by GORM (DB column is text[] which needs pq.StringArray)
-	Tags string `gorm:"-" json:"-"`
+	// Tags stored as JSON text in the database
+	Tags StringSlice `gorm:"type:text;serializer:json" json:"tags"`
 }
 
 // TableName returns the table name for Ticket
@@ -106,6 +110,7 @@ type CreateTicketRequest struct {
 	Category    string   `json:"category" binding:"required"`
 	AlertID     *string  `json:"alert_id,omitempty"`
 	DeviceID    string   `json:"device_id,omitempty"`
+	DeviceName  string   `json:"device_name,omitempty"`
 	Assignee    string   `json:"assignee,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
 }

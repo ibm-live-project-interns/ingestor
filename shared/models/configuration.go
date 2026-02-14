@@ -71,7 +71,7 @@ type CreateRuleRequest struct {
 	Description string `json:"description"`
 	Condition   string `json:"condition" binding:"required"`
 	Duration    string `json:"duration"`
-	Severity    string `json:"severity" binding:"required,oneof=critical major warning info"`
+	Severity    string `json:"severity" binding:"required,oneof=critical high major medium minor low info"`
 	Enabled     *bool  `json:"enabled"`
 }
 

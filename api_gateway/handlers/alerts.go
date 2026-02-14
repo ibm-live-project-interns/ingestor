@@ -11,6 +11,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"api_gateway/services"
+
 	"github.com/ibm-live-project-interns/ingestor/shared/config"
 	"github.com/ibm-live-project-interns/ingestor/shared/constants"
 	"github.com/ibm-live-project-interns/ingestor/shared/database"
@@ -383,6 +385,30 @@ func AcknowledgeAlert(c *gin.Context) {
 	// Fetch updated alert
 	updatedAlert, _ := repo.GetByID(id)
 
+	// Send alert-acknowledged email notification (non-blocking)
+	if services.Email != nil && alert != nil {
+		go func() {
+			email, _ := c.Get("email")
+			emailStr := fmt.Sprintf("%v", email)
+			if emailStr == "" || emailStr == "<nil>" {
+				return
+			}
+			custom := map[string]interface{}{
+				"AlertID":   id,
+				"Title":     alert.Title,
+				"Severity":  alert.Severity,
+				"Device":    alert.Device,
+				"AckedBy":   usernameStr,
+				"Timestamp": time.Now().Format("Jan 2, 2006 3:04 PM"),
+				"ActionURL": fmt.Sprintf("%s/alerts/%s", services.Email.FrontendURL(), id),
+			}
+			subject := fmt.Sprintf("[Acknowledged] %s – %s", alert.Device, alert.Title)
+			if err := services.Email.SendNotification(emailStr, usernameStr, subject, "alert-acknowledged", custom); err != nil {
+				logger.Warn("Failed to send alert-acknowledged email: %v", err)
+			}
+		}()
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"message":         "Alert acknowledged",
 		"alert":           updatedAlert,
@@ -432,6 +458,31 @@ func DismissAlert(c *gin.Context) {
 
 	// Fetch updated alert
 	updatedAlert, _ := repo.GetByID(id)
+
+	// Send alert-dismissed email notification (non-blocking)
+	if services.Email != nil && alert != nil {
+		go func() {
+			email, _ := c.Get("email")
+			emailStr := fmt.Sprintf("%v", email)
+			if emailStr == "" || emailStr == "<nil>" {
+				return
+			}
+			custom := map[string]interface{}{
+				"AlertID":     id,
+				"Title":       alert.Title,
+				"Severity":    alert.Severity,
+				"Device":      alert.Device,
+				"DismissedBy": usernameStr,
+				"Reason":      "Dismissed by operator",
+				"Timestamp":   time.Now().Format("Jan 2, 2006 3:04 PM"),
+				"ActionURL":   fmt.Sprintf("%s/alerts/%s", services.Email.FrontendURL(), id),
+			}
+			subject := fmt.Sprintf("[Dismissed] %s – %s", alert.Device, alert.Title)
+			if err := services.Email.SendNotification(emailStr, usernameStr, subject, "alert-dismissed", custom); err != nil {
+				logger.Warn("Failed to send alert-dismissed email: %v", err)
+			}
+		}()
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":      "Alert dismissed",
@@ -496,6 +547,31 @@ func ResolveAlert(c *gin.Context) {
 
 	// Fetch updated alert
 	updatedAlert, _ := repo.GetByID(id)
+
+	// Send alert-resolved email notification (non-blocking)
+	if services.Email != nil && alert != nil {
+		go func() {
+			email, _ := c.Get("email")
+			emailStr := fmt.Sprintf("%v", email)
+			if emailStr == "" || emailStr == "<nil>" {
+				return
+			}
+			custom := map[string]interface{}{
+				"AlertID":    id,
+				"Title":      alert.Title,
+				"Severity":   alert.Severity,
+				"Device":     alert.Device,
+				"ResolvedBy": usernameStr,
+				"Duration":   "N/A",
+				"Timestamp":  time.Now().Format("Jan 2, 2006 3:04 PM"),
+				"ActionURL":  fmt.Sprintf("%s/alerts/%s", services.Email.FrontendURL(), id),
+			}
+			subject := fmt.Sprintf("[Resolved] %s – %s", alert.Device, alert.Title)
+			if err := services.Email.SendNotification(emailStr, usernameStr, subject, "alert-resolved", custom); err != nil {
+				logger.Warn("Failed to send alert-resolved email: %v", err)
+			}
+		}()
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":     "Alert resolved",

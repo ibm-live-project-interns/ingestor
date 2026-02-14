@@ -1,0 +1,25 @@
+{{define "content"}}
+<h2>New Runbook Published</h2>
+<p>Hi {{.Username}},</p>
+<p>A new runbook has been published that may be relevant to your work.</p>
+
+<div style="background: #d0e2ff; padding: 16px; margin: 16px 0; border-left: 4px solid #0f62fe;">
+    <p style="margin: 0 0 8px 0; font-weight: 600; font-size: 16px; color: #161616;">{{if .Custom.RunbookTitle}}{{.Custom.RunbookTitle}}{{else}}New Runbook{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Category:</strong> {{if .Custom.Category}}{{.Custom.Category}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Author:</strong> {{if .Custom.Author}}{{.Custom.Author}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0; font-size: 14px; color: #525252;"><strong>Steps:</strong> {{if .Custom.StepCount}}{{.Custom.StepCount}}{{else}}N/A{{end}}</p>
+</div>
+
+{{if .Custom.Description}}
+<div style="margin: 16px 0;">
+    <p style="font-size: 12px; font-weight: 600; color: #6f6f6f; text-transform: uppercase; letter-spacing: 0.32px; margin: 0 0 8px 0;">Description</p>
+    <p style="font-size: 14px; color: #525252; margin: 0;">{{.Custom.Description}}</p>
+</div>
+{{end}}
+
+<a href="{{.ActionURL}}" class="button">View Runbook</a>
+
+<div class="notice">
+    <p>Runbooks help standardize procedures across the team. Review and provide feedback if you have improvements to suggest.</p>
+</div>
+{{end}}

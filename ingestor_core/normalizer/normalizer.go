@@ -1,8 +1,10 @@
 package normalizer
 
 import (
+	"strings"
 	"time"
 
+	"github.com/ibm-live-project-interns/ingestor/shared/constants"
 	"github.com/ibm-live-project-interns/ingestor/shared/models"
 )
 
@@ -42,9 +44,9 @@ func Normalize(raw map[string]interface{}) models.Event {
 		event.Message = v
 	}
 
-	// severity
+	// severity — normalize common aliases to canonical values
 	if v, ok := raw["severity"].(string); ok && v != "" {
-		event.Severity = v
+		event.Severity = normalizeSeverity(v)
 	}
 
 	// raw_payload
@@ -52,12 +54,41 @@ func Normalize(raw map[string]interface{}) models.Event {
 		event.RawPayload = v
 	}
 
-	// timestamp (RFC3339 expected)
-	if v, ok := raw["timestamp"].(string); ok {
+	// timestamp (RFC3339 expected) — accept both "timestamp" and "event_timestamp"
+	if v, ok := raw["event_timestamp"].(string); ok {
+		if ts, err := time.Parse(time.RFC3339, v); err == nil {
+			event.EventTimestamp = ts
+		}
+	} else if v, ok := raw["timestamp"].(string); ok {
 		if ts, err := time.Parse(time.RFC3339, v); err == nil {
 			event.EventTimestamp = ts
 		}
 	}
 
 	return event
+}
+
+// normalizeSeverity maps common severity aliases (e.g. syslog levels) to
+// canonical values defined in constants.AllSeverities.
+func normalizeSeverity(raw string) string {
+	lower := strings.ToLower(raw)
+
+	// If already a canonical value, return as-is.
+	if constants.IsValidSeverity(lower) {
+		return lower
+	}
+
+	// Map common syslog / external severity names.
+	switch lower {
+	case "error", "err", "emergency", "emerg", "alert", "crit":
+		return constants.SeverityCritical
+	case "warning", "warn":
+		return constants.SeverityMedium
+	case "notice":
+		return constants.SeverityLow
+	case "debug", "trace":
+		return constants.SeverityInfo
+	default:
+		return constants.SeverityInfo
+	}
 }

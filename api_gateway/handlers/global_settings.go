@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/ibm-live-project-interns/ingestor/shared/logger"
+	"github.com/ibm-live-project-interns/ingestor/shared/rbac"
 )
 
 // GlobalSettings holds the system-wide configuration toggles that apply
@@ -39,7 +40,25 @@ func GetGlobalSettings(c *gin.Context) {
 
 // UpdateGlobalSettings replaces the global configuration settings.
 // PUT /api/v1/configuration/global-settings
+// Defense-in-depth: validates role even though middleware should gate access.
 func UpdateGlobalSettings(c *gin.Context) {
+	// RBAC defense-in-depth: only sysadmin and senior-eng may update global settings.
+	role, exists := c.Get("role")
+	if !exists {
+		c.JSON(http.StatusForbidden, gin.H{"error": "No role found in request context"})
+		return
+	}
+	roleStr, ok := role.(string)
+	if !ok {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Invalid role in request context"})
+		return
+	}
+	rid := rbac.RoleID(roleStr)
+	if rid != rbac.RoleSysAdmin && rid != rbac.RoleSeniorEng {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Insufficient role: requires sysadmin or senior-eng"})
+		return
+	}
+
 	var req GlobalSettings
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body: " + err.Error()})

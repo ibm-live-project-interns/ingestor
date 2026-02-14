@@ -4,6 +4,7 @@ package database
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -76,18 +77,30 @@ type Database struct {
 }
 
 var (
-	instance *Database
-	once     sync.Once
-	initErr  error
+	instance    *Database
+	initialized bool
+	initMu      sync.Mutex
 )
 
-// Init initializes the global database instance
-// Should be called once at application startup
+// Init initializes the global database instance.
+// Uses a mutex instead of sync.Once so that initialization can be retried
+// if the first attempt fails (e.g., database temporarily unavailable at startup).
 func Init(cfg DBConfig) (*Database, error) {
-	once.Do(func() {
-		instance, initErr = NewDatabase(cfg)
-	})
-	return instance, initErr
+	initMu.Lock()
+	defer initMu.Unlock()
+
+	if initialized && instance != nil {
+		return instance, nil
+	}
+
+	db, err := NewDatabase(cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	instance = db
+	initialized = true
+	return instance, nil
 }
 
 // InitWithDefaults initializes with default configuration from environment
@@ -113,9 +126,8 @@ func NewDatabase(cfg DBConfig) (*Database, error) {
 	gormLogger := gormlogger.Default.LogMode(cfg.LogLevel)
 
 	db, err := gorm.Open(postgres.Open(cfg.DSN()), &gorm.Config{
-		Logger:                 gormLogger,
-		SkipDefaultTransaction: true,
-		PrepareStmt:            true,
+		Logger:      gormLogger,
+		PrepareStmt: true,
 		NowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -182,4 +194,16 @@ func Close() error {
 		return instance.Close()
 	}
 	return nil
+}
+
+// EscapeLike escapes SQL LIKE/ILIKE metacharacters (% and _) in user input
+// to prevent unintended wildcard matching. The backslash is also escaped
+// since PostgreSQL uses it as the default LIKE escape character.
+func EscapeLike(s string) string {
+	replacer := strings.NewReplacer(
+		`\`, `\\`,
+		`%`, `\%`,
+		`_`, `\_`,
+	)
+	return replacer.Replace(s)
 }

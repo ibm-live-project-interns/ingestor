@@ -1,0 +1,24 @@
+{{define "content"}}
+<h2 style="color: #da1e28;">Escalation Triggered – Level {{if .Custom.EscalationLevel}}{{.Custom.EscalationLevel}}{{else}}N/A{{end}}</h2>
+<p>Hi {{.Username}},</p>
+<p>An alert has been <strong>escalated to Level {{if .Custom.EscalationLevel}}{{.Custom.EscalationLevel}}{{else}}N/A{{end}}</strong> because it was not resolved within the required timeframe.</p>
+
+<div style="background: #fff1f1; padding: 16px; margin: 16px 0; border-left: 4px solid #da1e28;">
+    <p style="margin: 0 0 8px 0; font-weight: 600; font-size: 16px; color: #161616;">{{if .Custom.AlertID}}{{.Custom.AlertID}}{{end}}: {{if .Custom.Title}}{{.Custom.Title}}{{else}}Alert{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Severity:</strong> {{if .Custom.Severity}}{{.Custom.Severity}}{{else}}critical{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #525252;"><strong>Device:</strong> {{if .Custom.Device}}{{.Custom.Device}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0 0 8px 0; font-size: 14px; color: #da1e28;"><strong>Time elapsed:</strong> {{if .Custom.TimeElapsed}}{{.Custom.TimeElapsed}}{{else}}N/A{{end}}</p>
+    <p style="margin: 0; font-size: 14px; color: #525252;"><strong>Previous assignee:</strong> {{if .Custom.PreviousAssignee}}{{.Custom.PreviousAssignee}}{{else}}Unassigned{{end}}</p>
+</div>
+
+<div style="background: #f4f4f4; padding: 12px 16px; margin: 16px 0;">
+    <p style="margin: 0; font-size: 14px; color: #525252;"><strong>Escalation policy:</strong> {{if .Custom.PolicyName}}{{.Custom.PolicyName}}{{else}}Default{{end}}</p>
+    <p style="margin: 4px 0 0 0; font-size: 14px; color: #525252;"><strong>Next escalation in:</strong> {{if .Custom.NextEscalationIn}}{{.Custom.NextEscalationIn}}{{else}}N/A{{end}}</p>
+</div>
+
+<a href="{{.ActionURL}}" class="button" style="background: #da1e28;">Acknowledge & Investigate</a>
+
+<div class="notice">
+    <p>If this alert is not resolved at this level, it will be further escalated per the configured escalation policy.</p>
+</div>
+{{end}}

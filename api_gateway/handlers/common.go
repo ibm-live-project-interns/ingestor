@@ -159,20 +159,22 @@ func getDemoNoisyDevices() []models.NoisyDevice {
 	}
 }
 
-// Device represents a network device in the system (used for demo mode)
+// Device represents a network device in the system (used for demo mode).
+// GORM tags map to the PostgreSQL devices table columns from init.sql.
+// JSON tags use snake_case to match what the frontend expects.
 type Device struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Type        string    `json:"type"`
-	IP          string    `json:"ip"`
-	Location    string    `json:"location"`
-	Status      string    `json:"status"`
-	Vendor      string    `json:"vendor"`
-	Model       string    `json:"model"`
-	LastSeen    time.Time `json:"lastSeen"`
-	AlertCount  int       `json:"alertCount"`
-	Uptime      string    `json:"uptime"`
-	Description string    `json:"description,omitempty"`
+	ID          string    `json:"id" gorm:"column:id;primaryKey"`
+	Name        string    `json:"name" gorm:"column:name"`
+	Type        string    `json:"type" gorm:"column:icon"`
+	IP          string    `json:"ip" gorm:"column:ip"`
+	Location    string    `json:"location" gorm:"column:location"`
+	Status      string    `json:"status" gorm:"column:status"`
+	Vendor      string    `json:"vendor" gorm:"column:vendor"`
+	Model       string    `json:"model" gorm:"column:model"`
+	LastSeen    time.Time `json:"last_seen" gorm:"-"`
+	AlertCount  int       `json:"alert_count" gorm:"column:alert_count"`
+	Uptime      string    `json:"uptime" gorm:"-"`
+	Description string    `json:"description,omitempty" gorm:"-"`
 }
 
 // getDemoDevices returns demo devices for when database is unavailable
@@ -1057,7 +1059,7 @@ func GetAIMetrics(c *gin.Context) {
 	var patternsFound int64
 	db.Model(&models.Alert{}).
 		Where("ai_summary IS NOT NULL AND ai_summary != ''").
-		Select("COUNT(DISTINCT CONCAT(device, '-', severity))").
+		Select("COUNT(DISTINCT (device || '-' || severity))").
 		Scan(&patternsFound)
 
 	// Get last processed alert

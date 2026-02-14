@@ -21,7 +21,7 @@ func SecurityHeaders() gin.HandlerFunc {
 
 // CORS returns a CORS middleware
 func CORS() gin.HandlerFunc {
-	allowOrigin := config.GetEnv("CORS_ALLOWED_ORIGINS", "*")
+	allowOrigin := config.GetEnv("CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:5174,http://localhost:3000")
 	allowMethods := config.GetEnv("CORS_ALLOWED_METHODS", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 	allowHeaders := config.GetEnv("CORS_ALLOWED_HEADERS", "Origin, Content-Type, Accept, Authorization, X-Request-ID")
 	exposeHeaders := config.GetEnv("CORS_EXPOSE_HEADERS", "X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset")
