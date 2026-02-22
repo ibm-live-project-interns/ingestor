@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"net/http"
 	"os"
@@ -51,8 +52,13 @@ func main() {
 		} else {
 			logger.Info("Database connected: %s@%s:%s/%s", dbCfg.User, dbCfg.Host, dbCfg.Port, dbCfg.DBName)
 			// Auto-migrate tables that may not exist in the init.sql schema
-			if err := db.AutoMigrate(&models.AuditLog{}); err != nil {
-				logger.Warn("Auto-migration failed for audit_logs: %v", err)
+			if err := db.AutoMigrate(
+				&models.AuditLog{},
+				&models.OnCallSchedule{},
+				&models.OnCallOverride{},
+				&models.PostMortem{},
+			); err != nil {
+				logger.Warn("Auto-migration failed: %v", err)
 			}
 		}
 	}
@@ -154,6 +160,8 @@ func main() {
 			protected.GET("/alerts/recurring", handlers.GetRecurringAlerts)
 			protected.GET("/alerts/distribution/time", handlers.GetAlertDistributionTime)
 			protected.GET("/alerts/:id", handlers.GetAlertByID)
+			protected.GET("/alerts/:id/tickets", handlers.GetAlertTickets)
+			protected.GET("/alerts/:id/post-mortem", handlers.GetAlertPostMortem)
 
 			// Only users with acknowledge-alerts permission can modify alert state
 			alertActions := protected.Group("")
@@ -163,6 +171,8 @@ func main() {
 				alertActions.POST("/alerts/:id/dismiss", handlers.DismissAlert)
 				alertActions.POST("/alerts/:id/resolve", handlers.ResolveAlert)
 				alertActions.POST("/alerts/:id/reanalyze", handlers.ReanalyzeAlert)
+				alertActions.POST("/alerts/bulk-action", handlers.BulkAlertAction)
+				alertActions.POST("/alerts/:id/post-mortem", handlers.CreatePostMortem)
 			}
 
 			// Tickets - GET (view permissions handled by frontend)
@@ -232,15 +242,24 @@ func main() {
 				auditAdmin.GET("/audit-logs/actions", handlers.GetAuditLogActions)
 			}
 
-			// On-Call Schedule
+			// On-Call Schedule (read)
 			protected.GET("/on-call/current", handlers.GetCurrentOnCall)
 			protected.GET("/on-call/schedule", handlers.GetOnCallSchedule)
+			protected.GET("/on-call/schedules", handlers.GetOnCallSchedules)
+
+			// On-Call Schedule CRUD (write - all authenticated users can manage schedules)
+			protected.POST("/on-call/schedules", handlers.CreateOnCallSchedule)
+			protected.PUT("/on-call/schedules/:id", handlers.UpdateOnCallSchedule)
+			protected.DELETE("/on-call/schedules/:id", handlers.DeleteOnCallSchedule)
+			protected.POST("/on-call/overrides", handlers.CreateOnCallOverride)
+			protected.DELETE("/on-call/overrides/:id", handlers.DeleteOnCallOverride)
 
 			// Network Topology
 			protected.GET("/topology", handlers.GetTopology)
 
-			// Runbook write operations require sysadmin or senior-eng role
+			// Runbook read operations (all authenticated users)
 			protected.GET("/runbooks", handlers.GetRunbooks)
+			protected.GET("/runbooks/suggest", handlers.SuggestRunbooks)
 			protected.GET("/runbooks/:id", handlers.GetRunbookByID)
 			runbookAdmin := protected.Group("")
 			runbookAdmin.Use(middleware.RequireRole(rbac.RoleSysAdmin, rbac.RoleSeniorEng))
@@ -320,6 +339,17 @@ func main() {
 			// Docker Container Status & Logs
 			protected.GET("/services/status", handlers.GetDockerServiceStatus)
 			protected.GET("/services/:name/logs", handlers.GetDockerServiceLogs)
+
+			// Post-Mortems (list and update - all authenticated users)
+			protected.GET("/post-mortems", handlers.ListPostMortems)
+			protected.PUT("/post-mortems/:id", handlers.UpdatePostMortem)
+
+			// System Health (sysadmin only)
+			sysHealthAdmin := protected.Group("")
+			sysHealthAdmin.Use(middleware.RequireRole(rbac.RoleSysAdmin))
+			{
+				sysHealthAdmin.GET("/system/health", handlers.GetSystemHealth)
+			}
 
 			// Ingest (also available internally)
 			protected.POST("/events", handlers.IngestEvent)
@@ -422,12 +452,13 @@ func internalAPIKeyMiddleware() gin.HandlerFunc {
 			return
 		}
 
+		// Only accept API key via header -- never from query params,
+		// which leak into access logs, browser history, and referrer headers.
 		providedKey := c.GetHeader("X-Internal-API-Key")
-		if providedKey == "" {
-			providedKey = c.Query("api_key")
-		}
 
-		if providedKey != apiKey {
+		// Use constant-time comparison to prevent timing attacks
+		// that could leak key length or content via response latency.
+		if subtle.ConstantTimeCompare([]byte(providedKey), []byte(apiKey)) != 1 {
 			logger.Warn("Unauthorized internal API access from %s to %s", c.ClientIP(), c.Request.URL.Path)
 			c.JSON(http.StatusForbidden, gin.H{"error": "Invalid or missing internal API key"})
 			c.Abort()

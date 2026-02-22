@@ -2,8 +2,6 @@ package handlers
 
 import (
 	"fmt"
-	"math"
-	"math/rand"
 	"net/http"
 	"strings"
 	"time"
@@ -131,257 +129,44 @@ func IngestEvent(c *gin.Context) {
 		logger.Debug("Alert %s has no AI analysis data", alertID)
 	}
 
+	// Check if the device is under an active maintenance window.
+	// The maintenance_windows table has: name, schedule, duration, status.
+	// If status='active' and the device name matches part of the window name,
+	// suppress the alert instead of creating it in the default state.
+	suppressedReason := checkMaintenanceWindowSuppression(database.Get(), alert.Device)
+	if suppressedReason != "" {
+		alert.Status = "suppressed"
+		logger.Info("Alert %s suppressed: %s", alertID, suppressedReason)
+	}
+
 	if err := repo.Create(&alert); err != nil {
 		apiErr := errors.NewDatabaseError("create", err)
 		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
 		return
 	}
 
-	logger.Info("Alert %s created from ingest event: severity=%s category=%s device=%s has_ai=%v", alertID, alert.Severity, req.Category, req.SourceHost, req.AIAnalysis != nil)
+	logger.Info("Alert %s created from ingest event: severity=%s category=%s device=%s has_ai=%v suppressed=%v", alertID, alert.Severity, req.Category, req.SourceHost, req.AIAnalysis != nil, suppressedReason != "")
 
-	// Send email notifications asynchronously
-	go sendAlertEmailNotifications(alert)
+	// Send email notifications asynchronously (skip if suppressed)
+	if suppressedReason == "" {
+		go sendAlertEmailNotifications(alert)
+	}
 
-	c.JSON(http.StatusCreated, gin.H{
+	response := gin.H{
 		"message":  "Event ingested successfully",
 		"alert_id": alertID,
-	})
-}
-
-// getDemoNoisyDevices returns demo noisy devices for when database is unavailable
-func getDemoNoisyDevices() []models.NoisyDevice {
-	return []models.NoisyDevice{
-		{DeviceID: "router-core-01", DeviceName: "router-core-01", AlertCount: 45, TopIssue: "High CPU Utilization"},
-		{DeviceID: "switch-dist-02", DeviceName: "switch-dist-02", AlertCount: 32, TopIssue: "Interface Flapping"},
-		{DeviceID: "server-app-01", DeviceName: "server-app-01", AlertCount: 28, TopIssue: "Memory Warning"},
-		{DeviceID: "firewall-edge-01", DeviceName: "firewall-edge-01", AlertCount: 21, TopIssue: "Connection Timeout"},
-		{DeviceID: "db-prod-01", DeviceName: "db-prod-01", AlertCount: 15, TopIssue: "Disk Space Low"},
 	}
-}
-
-// Device represents a network device in the system (used for demo mode).
-// GORM tags map to the PostgreSQL devices table columns from init.sql.
-// JSON tags use snake_case to match what the frontend expects.
-type Device struct {
-	ID          string    `json:"id" gorm:"column:id;primaryKey"`
-	Name        string    `json:"name" gorm:"column:name"`
-	Type        string    `json:"type" gorm:"column:icon"`
-	IP          string    `json:"ip" gorm:"column:ip"`
-	Location    string    `json:"location" gorm:"column:location"`
-	Status      string    `json:"status" gorm:"column:status"`
-	Vendor      string    `json:"vendor" gorm:"column:vendor"`
-	Model       string    `json:"model" gorm:"column:model"`
-	LastSeen    time.Time `json:"last_seen" gorm:"-"`
-	AlertCount  int       `json:"alert_count" gorm:"column:alert_count"`
-	Uptime      string    `json:"uptime" gorm:"-"`
-	Description string    `json:"description,omitempty" gorm:"-"`
-}
-
-// getDemoDevices returns demo devices for when database is unavailable
-func getDemoDevices() []Device {
-	now := time.Now()
-	return []Device{
-		{
-			ID:         "router-core-01",
-			Name:       "Core Router 01",
-			Type:       "Router",
-			IP:         "192.168.1.1",
-			Location:   "Data Center A - Rack 1",
-			Status:     "online",
-			Vendor:     "Cisco",
-			Model:      "ISR 4451-X",
-			LastSeen:   now.Add(-2 * time.Minute),
-			AlertCount: 3,
-			Uptime:     "45d 12h 30m",
-		},
-		{
-			ID:         "switch-dist-02",
-			Name:       "Distribution Switch 02",
-			Type:       "Switch",
-			IP:         "192.168.1.10",
-			Location:   "Data Center A - Rack 2",
-			Status:     "online",
-			Vendor:     "Cisco",
-			Model:      "Catalyst 9300",
-			LastSeen:   now.Add(-1 * time.Minute),
-			AlertCount: 1,
-			Uptime:     "30d 8h 15m",
-		},
-		{
-			ID:         "firewall-edge-01",
-			Name:       "Edge Firewall 01",
-			Type:       "Firewall",
-			IP:         "192.168.1.254",
-			Location:   "Data Center A - Rack 1",
-			Status:     "online",
-			Vendor:     "Palo Alto",
-			Model:      "PA-3220",
-			LastSeen:   now.Add(-30 * time.Second),
-			AlertCount: 0,
-			Uptime:     "60d 4h 45m",
-		},
-		{
-			ID:         "server-app-01",
-			Name:       "Application Server 01",
-			Type:       "Server",
-			IP:         "192.168.2.10",
-			Location:   "Data Center B - Rack 5",
-			Status:     "degraded",
-			Vendor:     "Dell",
-			Model:      "PowerEdge R740",
-			LastSeen:   now.Add(-5 * time.Minute),
-			AlertCount: 5,
-			Uptime:     "12d 6h 20m",
-		},
-		{
-			ID:         "server-db-01",
-			Name:       "Database Server 01",
-			Type:       "Server",
-			IP:         "192.168.2.20",
-			Location:   "Data Center B - Rack 6",
-			Status:     "online",
-			Vendor:     "HP",
-			Model:      "ProLiant DL380",
-			LastSeen:   now.Add(-1 * time.Minute),
-			AlertCount: 0,
-			Uptime:     "90d 2h 10m",
-		},
-		{
-			ID:         "ap-floor1-01",
-			Name:       "Access Point Floor 1",
-			Type:       "Access Point",
-			IP:         "192.168.3.50",
-			Location:   "Building A - Floor 1",
-			Status:     "online",
-			Vendor:     "Aruba",
-			Model:      "AP-535",
-			LastSeen:   now.Add(-3 * time.Minute),
-			AlertCount: 0,
-			Uptime:     "15d 18h 5m",
-		},
-		{
-			ID:         "lb-prod-01",
-			Name:       "Production Load Balancer",
-			Type:       "Load Balancer",
-			IP:         "192.168.1.100",
-			Location:   "Data Center A - Rack 3",
-			Status:     "online",
-			Vendor:     "F5",
-			Model:      "BIG-IP i5800",
-			LastSeen:   now.Add(-1 * time.Minute),
-			AlertCount: 2,
-			Uptime:     "120d 5h 30m",
-		},
-		{
-			ID:         "switch-access-05",
-			Name:       "Access Switch 05",
-			Type:       "Switch",
-			IP:         "192.168.4.5",
-			Location:   "Building B - Floor 2",
-			Status:     "offline",
-			Vendor:     "Juniper",
-			Model:      "EX3400",
-			LastSeen:   now.Add(-2 * time.Hour),
-			AlertCount: 8,
-			Uptime:     "0d 0h 0m",
-		},
+	if suppressedReason != "" {
+		response["suppressed"]        = true
+		response["suppressed_reason"] = suppressedReason
 	}
+
+	c.JSON(http.StatusCreated, response)
 }
 
 // ---------------------------------------------------------------------------
-// Device enrichment: the PostgreSQL devices table only stores basic fields
-// (id, name, ip, icon, model, vendor, location, status, alert_count).
-// Fields like type, health_score, cpu_usage, memory_usage, network_in/out,
-// uptime, and last_seen are computed in Go after the DB query.
+// Shared utility functions used across multiple handler files
 // ---------------------------------------------------------------------------
-
-// rawDevice represents a device row as it actually exists in the PostgreSQL
-// devices table. Only includes columns present in the schema.
-type rawDevice struct {
-	ID         string     `gorm:"column:id"`
-	Name       string     `gorm:"column:name"`
-	IP         string     `gorm:"column:ip"`
-	Icon       string     `gorm:"column:icon"`
-	Model      string     `gorm:"column:model"`
-	Vendor     string     `gorm:"column:vendor"`
-	Location   string     `gorm:"column:location"`
-	Status     string     `gorm:"column:status"`
-	AlertCount int        `gorm:"column:alert_count"`
-	CreatedAt  *time.Time `gorm:"column:created_at"`
-	UpdatedAt  *time.Time `gorm:"column:updated_at"`
-}
-
-// enrichedDevice is the JSON response shape sent to the frontend.
-// Fields not present in the DB are computed/inferred in Go.
-type enrichedDevice struct {
-	ID           string    `json:"id"`
-	Name         string    `json:"name"`
-	Type         string    `json:"type"`
-	IP           string    `json:"ip"`
-	Location     string    `json:"location"`
-	Status       string    `json:"status"`
-	Vendor       string    `json:"vendor"`
-	Model        string    `json:"model"`
-	HealthScore  int       `json:"health_score"`
-	RecentAlerts int       `json:"recent_alerts"`
-	Uptime       string    `json:"uptime"`
-	CPUUsage     float64   `json:"cpu_usage"`
-	MemoryUsage  float64   `json:"memory_usage"`
-	NetworkIn    int64     `json:"network_in"`
-	NetworkOut   int64     `json:"network_out"`
-	LastSeen     time.Time `json:"last_seen"`
-	Description  string    `json:"description,omitempty"`
-	Firmware     string    `json:"firmware,omitempty"`
-	SerialNumber string    `json:"serial_number,omitempty"`
-	MACAddress   string    `json:"mac_address,omitempty"`
-}
-
-// inferDeviceType determines a device type from its icon, model, and vendor fields.
-func inferDeviceType(icon, model, vendor string) string {
-	// First check the icon field which is set in the DB seed data
-	switch strings.ToLower(strings.TrimSpace(icon)) {
-	case "switch":
-		return "Switch"
-	case "router":
-		return "Router"
-	case "firewall":
-		return "Firewall"
-	case "server":
-		return "Server"
-	case "access_point", "ap", "wireless":
-		return "Access Point"
-	case "load_balancer", "lb":
-		return "Load Balancer"
-	}
-
-	// Fall back to checking model and vendor strings
-	lowerModel := strings.ToLower(model)
-	lowerVendor := strings.ToLower(vendor)
-	combined := lowerModel + " " + lowerVendor
-
-	switch {
-	case strings.Contains(combined, "catalyst") || strings.Contains(combined, "ex3400") ||
-		strings.Contains(combined, "ex4300") || strings.Contains(lowerModel, "switch"):
-		return "Switch"
-	case strings.Contains(combined, "isr") || strings.Contains(combined, "mx960") ||
-		strings.Contains(combined, "mx480") || strings.Contains(lowerModel, "router"):
-		return "Router"
-	case strings.Contains(combined, "palo alto") || strings.Contains(combined, "pa-") ||
-		strings.Contains(combined, "fortigate") || strings.Contains(lowerModel, "firewall"):
-		return "Firewall"
-	case strings.Contains(combined, "big-ip") || strings.Contains(combined, "f5") ||
-		strings.Contains(lowerModel, "load balancer"):
-		return "Load Balancer"
-	case strings.Contains(combined, "ap-") || strings.Contains(combined, "aruba") ||
-		strings.Contains(lowerModel, "access point"):
-		return "Access Point"
-	case strings.Contains(combined, "poweredge") || strings.Contains(combined, "proliant") ||
-		strings.Contains(combined, "dell") || strings.Contains(combined, "hp"):
-		return "Server"
-	default:
-		return "Server"
-	}
-}
 
 // deterministicHash produces a stable non-negative integer from a string,
 // used to seed deterministic-but-varied values per device.
@@ -396,896 +181,6 @@ func deterministicHash(s string) int64 {
 	return h
 }
 
-// generateUptime produces a realistic uptime string like "45d 12h" based on
-// a deterministic hash of the device ID. The value drifts slowly over time
-// so it looks alive on refresh.
-func generateUptime(deviceID string) string {
-	h := deterministicHash(deviceID)
-	// Base days in range 5-180, hours 0-23
-	baseDays := int(h%176) + 5
-	baseHours := int((h / 7) % 24)
-	// Add a slow drift: current day-of-year modulo a small range
-	drift := time.Now().YearDay() % 10
-	days := baseDays + drift
-	return fmt.Sprintf("%dd %dh", days, baseHours)
-}
-
-// generateDeviceMetricValue produces a deterministic float in [lo, hi) for a
-// given device ID and metric name. It changes slowly over time (every ~5 min).
-func generateDeviceMetricValue(deviceID, metric string, lo, hi float64) float64 {
-	h := deterministicHash(deviceID + ":" + metric)
-	// Add slow time component so values shift on refresh
-	timeSlot := time.Now().Unix() / 300 // changes every 5 minutes
-	combined := h + timeSlot
-	if combined < 0 {
-		combined = -combined
-	}
-	// Map to [0, 1)
-	normalized := float64(combined%10000) / 10000.0
-	return math.Round((lo+normalized*(hi-lo))*100) / 100
-}
-
-// getRecentAlertCounts queries the alerts table and returns a map of
-// device_name -> alert count for alerts in the last 24 hours. It tries
-// both the GORM-created "device" column and the SQL-schema "device_name"
-// column, falling back gracefully if one doesn't exist.
-func getRecentAlertCounts(db *database.Database, deviceNames []string) map[string]int {
-	counts := make(map[string]int, len(deviceNames))
-	if len(deviceNames) == 0 {
-		return counts
-	}
-
-	cutoff := time.Now().UTC().Add(-24 * time.Hour)
-
-	// Try GORM model column "device" first (used by IngestEvent handler)
-	type deviceAlertCount struct {
-		Device string
-		Count  int
-	}
-	var results []deviceAlertCount
-	err := db.Model(&models.Alert{}).
-		Select("device, COUNT(*) as count").
-		Where("device IN ? AND timestamp >= ?", deviceNames, cutoff).
-		Group("device").
-		Scan(&results).Error
-
-	if err == nil && len(results) > 0 {
-		for _, r := range results {
-			counts[r.Device] = r.Count
-		}
-		return counts
-	}
-
-	// Fallback: try the SQL-schema column "device_name" (used by init.sql seed data)
-	type deviceNameAlertCount struct {
-		DeviceName string `gorm:"column:device_name"`
-		Count      int
-	}
-	var results2 []deviceNameAlertCount
-	err2 := db.Table("alerts").
-		Select("device_name, COUNT(*) as count").
-		Where("device_name IN ? AND timestamp >= ?", deviceNames, cutoff).
-		Group("device_name").
-		Scan(&results2).Error
-
-	if err2 == nil {
-		for _, r := range results2 {
-			counts[r.DeviceName] = r.Count
-		}
-	}
-
-	return counts
-}
-
-// enrichOneDevice converts a raw DB device row into a fully populated enrichedDevice.
-func enrichOneDevice(d rawDevice, recentAlerts int) enrichedDevice {
-	now := time.Now().UTC()
-
-	// Determine last_seen: use updated_at if available, else now
-	lastSeen := now
-	if d.UpdatedAt != nil && !d.UpdatedAt.IsZero() {
-		lastSeen = *d.UpdatedAt
-	}
-
-	// Infer type from icon/model/vendor
-	deviceType := inferDeviceType(d.Icon, d.Model, d.Vendor)
-
-	// Compute health score: 100 - (recentAlerts * 5), clamped to [20, 100]
-	healthScore := 100 - (recentAlerts * 5)
-	if healthScore < 20 {
-		healthScore = 20
-	}
-	if healthScore > 100 {
-		healthScore = 100
-	}
-
-	// If the device is offline, reduce health significantly
-	if strings.EqualFold(d.Status, "offline") {
-		healthScore = 20
-	}
-
-	// Generate uptime (offline devices get "0d 0h")
-	uptime := generateUptime(d.ID)
-	if strings.EqualFold(d.Status, "offline") {
-		uptime = "0d 0h"
-	}
-
-	// CPU usage: range depends on health. Healthier devices have lower CPU.
-	cpuLo := 15.0
-	cpuHi := 45.0
-	if healthScore < 60 {
-		cpuLo = 50.0
-		cpuHi = 85.0
-	} else if healthScore < 80 {
-		cpuLo = 35.0
-		cpuHi = 65.0
-	}
-	cpuUsage := generateDeviceMetricValue(d.ID, "cpu", cpuLo, cpuHi)
-
-	// Memory usage: range depends on health
-	memLo := 30.0
-	memHi := 55.0
-	if healthScore < 60 {
-		memLo = 60.0
-		memHi = 90.0
-	} else if healthScore < 80 {
-		memLo = 45.0
-		memHi = 70.0
-	}
-	memUsage := generateDeviceMetricValue(d.ID, "mem", memLo, memHi)
-
-	// Network in/out in bytes/sec - vary by device type
-	var netInLo, netInHi, netOutLo, netOutHi float64
-	switch deviceType {
-	case "Router", "Switch":
-		netInLo, netInHi = 5000000, 50000000   // 5-50 MB/s
-		netOutLo, netOutHi = 4000000, 45000000  // 4-45 MB/s
-	case "Firewall":
-		netInLo, netInHi = 2000000, 30000000    // 2-30 MB/s
-		netOutLo, netOutHi = 1500000, 25000000   // 1.5-25 MB/s
-	case "Load Balancer":
-		netInLo, netInHi = 10000000, 80000000   // 10-80 MB/s
-		netOutLo, netOutHi = 8000000, 70000000   // 8-70 MB/s
-	default: // Server, AP, etc.
-		netInLo, netInHi = 1000000, 20000000     // 1-20 MB/s
-		netOutLo, netOutHi = 500000, 15000000    // 0.5-15 MB/s
-	}
-	networkIn := int64(generateDeviceMetricValue(d.ID, "netin", netInLo, netInHi))
-	networkOut := int64(generateDeviceMetricValue(d.ID, "netout", netOutLo, netOutHi))
-
-	// Offline devices have zero throughput and resource usage
-	if strings.EqualFold(d.Status, "offline") {
-		cpuUsage = 0
-		memUsage = 0
-		networkIn = 0
-		networkOut = 0
-	}
-
-	return enrichedDevice{
-		ID:           d.ID,
-		Name:         d.Name,
-		Type:         deviceType,
-		IP:           d.IP,
-		Location:     d.Location,
-		Status:       d.Status,
-		Vendor:       d.Vendor,
-		Model:        d.Model,
-		HealthScore:  healthScore,
-		RecentAlerts: recentAlerts,
-		Uptime:       uptime,
-		CPUUsage:     cpuUsage,
-		MemoryUsage:  memUsage,
-		NetworkIn:    networkIn,
-		NetworkOut:   networkOut,
-		LastSeen:     lastSeen,
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Device handlers
-// ---------------------------------------------------------------------------
-
-// GetDevices returns all devices with optional filtering - queries real DB with demo fallback
-func GetDevices(c *gin.Context) {
-	db := database.Get()
-	if db == nil {
-		logger.Warn("No database connection, returning demo devices")
-		devices := getDemoDevices()
-		c.JSON(http.StatusOK, gin.H{
-			"devices": devices,
-			"total":   len(devices),
-		})
-		return
-	}
-
-	// Query only columns that actually exist in the devices table
-	var rawDevices []rawDevice
-	query := db.Table("devices").
-		Select("id, name, ip, icon, model, vendor, location, status, alert_count, created_at, updated_at").
-		Where("deleted_at IS NULL").
-		Order("name ASC")
-
-	// Apply filters
-	if status := c.Query("status"); status != "" {
-		query = query.Where("status = ?", status)
-	}
-	if deviceType := c.Query("type"); deviceType != "" {
-		// The DB uses "icon" for device category; match on that
-		query = query.Where("LOWER(icon) = LOWER(?)", deviceType)
-	}
-
-	if err := query.Find(&rawDevices).Error; err != nil {
-		logger.Error("Failed to query devices from DB: %v, falling back to demo data", err)
-		devices := getDemoDevices()
-		c.JSON(http.StatusOK, gin.H{
-			"devices": devices,
-			"total":   len(devices),
-		})
-		return
-	}
-
-	// Collect device names for a single batch alert-count query
-	names := make([]string, len(rawDevices))
-	for i, d := range rawDevices {
-		names[i] = d.Name
-	}
-	alertCounts := getRecentAlertCounts(db, names)
-
-	// Enrich each device with computed fields
-	enriched := make([]enrichedDevice, 0, len(rawDevices))
-	for _, d := range rawDevices {
-		recentAlerts := alertCounts[d.Name]
-		enriched = append(enriched, enrichOneDevice(d, recentAlerts))
-	}
-
-	logger.Info("Returning %d enriched devices from database", len(enriched))
-	c.JSON(http.StatusOK, gin.H{
-		"devices": enriched,
-		"total":   len(enriched),
-	})
-}
-
-// GetDeviceByID returns a single device by ID - queries real DB with demo fallback
-func GetDeviceByID(c *gin.Context) {
-	deviceID := c.Param("id")
-
-	db := database.Get()
-	if db != nil {
-		var device rawDevice
-		err := db.Table("devices").
-			Select("id, name, ip, icon, model, vendor, location, status, alert_count, created_at, updated_at").
-			Where("id = ? AND deleted_at IS NULL", deviceID).
-			First(&device).Error
-
-		if err == nil {
-			// Count recent alerts for this specific device
-			alertCounts := getRecentAlertCounts(db, []string{device.Name})
-			recentAlerts := alertCounts[device.Name]
-
-			enriched := enrichOneDevice(device, recentAlerts)
-
-			// Generate deterministic firmware, serial number, and MAC for detail view
-			h := deterministicHash(device.ID)
-			enriched.Firmware = fmt.Sprintf("v%d.%d.%d", 1+(h%5), h%10, (h/3)%20)
-			idPrefix := device.ID
-			if len(idPrefix) > 3 {
-				idPrefix = idPrefix[:3]
-			}
-			enriched.SerialNumber = fmt.Sprintf("SN-%s-%06d", strings.ToUpper(idPrefix), h%1000000)
-			enriched.MACAddress = fmt.Sprintf("%02X:%02X:%02X:%02X:%02X:%02X",
-				(h/1)%256, (h/7)%256, (h/13)%256, (h/19)%256, (h/29)%256, (h/37)%256)
-
-			logger.Info("Returning enriched device %s from database", deviceID)
-			c.JSON(http.StatusOK, enriched)
-			return
-		}
-		logger.Warn("Device %s not found in database, checking demo data", deviceID)
-	}
-
-	// Fallback to demo devices
-	for _, d := range getDemoDevices() {
-		if d.ID == deviceID {
-			c.JSON(http.StatusOK, d)
-			return
-		}
-	}
-
-	apiErr := errors.NewNotFound(fmt.Sprintf("device %s", deviceID))
-	c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-}
-
-// GetNoisyDevices returns devices with high alert counts
-func GetNoisyDevices(c *gin.Context) {
-	limit := 10
-	if limitStr := c.Query("limit"); limitStr != "" {
-		if l, err := fmt.Sscanf(limitStr, "%d", &limit); err == nil && l > 0 {
-			// use parsed limit
-		}
-	}
-
-	repo := alertRepo()
-	if repo == nil {
-		// Demo mode - return demo noisy devices
-		devices := getDemoNoisyDevices()
-		if limit < len(devices) {
-			devices = devices[:limit]
-		}
-		c.JSON(http.StatusOK, devices)
-		return
-	}
-
-	noisyDevices, err := repo.GetNoisyDevices(limit)
-	if err != nil {
-		apiErr := errors.NewDatabaseError("query", err)
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	// Ensure device names are populated (the repo sets DeviceName = Device from
-	// alerts, but if the device column was empty we fall back to DeviceID)
-	for i := range noisyDevices {
-		if noisyDevices[i].DeviceName == "" {
-			noisyDevices[i].DeviceName = noisyDevices[i].DeviceID
-		}
-	}
-
-	c.JSON(http.StatusOK, noisyDevices)
-}
-
-// MetricDataPoint represents a single time-series metric sample
-type MetricDataPoint struct {
-	Timestamp    time.Time `json:"timestamp"`
-	CPUUsage     float64   `json:"cpu_usage"`
-	MemoryUsage  float64   `json:"memory_usage"`
-	BandwidthIn  float64   `json:"bandwidth_in"`
-	BandwidthOut float64   `json:"bandwidth_out"`
-	ErrorRate    float64   `json:"error_rate"`
-}
-
-// GetDeviceMetrics returns time-series performance metrics for a device.
-// Accepts query param "period" (1h, 6h, 24h, 7d), defaulting to 24h.
-// In demo mode (no DB), generates realistic synthetic data seeded from
-// the device's baseline CPU/memory values.
-func GetDeviceMetrics(c *gin.Context) {
-	deviceID := c.Param("id")
-
-	// Parse and validate period
-	period := c.DefaultQuery("period", "24h")
-	var duration time.Duration
-	var intervalMinutes int
-	switch period {
-	case "1h":
-		duration = 1 * time.Hour
-		intervalMinutes = 1 // 60 data points
-	case "6h":
-		duration = 6 * time.Hour
-		intervalMinutes = 5 // 72 data points
-	case "24h":
-		duration = 24 * time.Hour
-		intervalMinutes = 15 // 96 data points
-	case "7d":
-		duration = 7 * 24 * time.Hour
-		intervalMinutes = 60 // 168 data points
-	default:
-		apiErr := errors.NewBadRequest("Invalid period. Use 1h, 6h, 24h, or 7d")
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	// Try to get device baseline from DB (use enriched CPU/memory if available)
-	var baseCPU, baseMem float64
-	var deviceFound bool
-
-	db := database.Get()
-	if db != nil {
-		// Check if device exists by querying actual DB columns
-		var device rawDevice
-		if err := db.Table("devices").
-			Select("id, name, ip, icon, model, vendor, location, status, alert_count, created_at, updated_at").
-			Where("id = ? AND deleted_at IS NULL", deviceID).
-			First(&device).Error; err == nil {
-			deviceFound = true
-			// Use the enrichment logic to derive baseline CPU/memory
-			alertCounts := getRecentAlertCounts(db, []string{device.Name})
-			enriched := enrichOneDevice(device, alertCounts[device.Name])
-			baseCPU = enriched.CPUUsage
-			baseMem = enriched.MemoryUsage
-		}
-	}
-
-	// If no DB baseline, check demo devices for baseline
-	if !deviceFound {
-		for _, d := range getDemoDevices() {
-			if d.ID == deviceID {
-				deviceFound = true
-				// Demo devices don't carry CPU/memory; assign a realistic baseline
-				// based on device status
-				switch d.Status {
-				case "online":
-					baseCPU = 35.0
-					baseMem = 55.0
-				case "degraded":
-					baseCPU = 72.0
-					baseMem = 78.0
-				case "offline":
-					baseCPU = 0.0
-					baseMem = 0.0
-				default:
-					baseCPU = 45.0
-					baseMem = 60.0
-				}
-				break
-			}
-		}
-	}
-
-	if !deviceFound {
-		apiErr := errors.NewNotFound(fmt.Sprintf("device %s", deviceID))
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	// Generate realistic metric data using random walk with occasional spikes
-	metrics := generateRealisticMetrics(baseCPU, baseMem, duration, intervalMinutes, deviceID)
-
-	logger.Info("Returning %d metric data points for device %s (period=%s)", len(metrics), deviceID, period)
-	c.JSON(http.StatusOK, gin.H{
-		"metrics":   metrics,
-		"device_id": deviceID,
-		"period":    period,
-	})
-}
-
-// generateRealisticMetrics produces time-series data that mimics real device
-// behavior: gradual drift, minor jitter, diurnal patterns, and occasional
-// spikes. The deviceID is used as a seed so the same device always produces
-// consistent (but not identical) data within the same second.
-func generateRealisticMetrics(baseCPU, baseMem float64, totalDuration time.Duration, intervalMins int, deviceID string) []MetricDataPoint {
-	now := time.Now().UTC()
-	start := now.Add(-totalDuration)
-	interval := time.Duration(intervalMins) * time.Minute
-	numPoints := int(totalDuration / interval)
-	if numPoints < 1 {
-		numPoints = 1
-	}
-
-	// Derive a deterministic seed from deviceID so the same device gives
-	// visually consistent results across rapid refreshes in the same second,
-	// but differs meaningfully between devices.
-	seed := int64(0)
-	for _, ch := range deviceID {
-		seed = seed*31 + int64(ch)
-	}
-	seed += now.Unix() / 60 // changes every minute to simulate live data
-	rng := rand.New(rand.NewSource(seed))
-
-	points := make([]MetricDataPoint, 0, numPoints)
-
-	// State variables for random walk
-	cpu := baseCPU
-	mem := baseMem
-	bwIn := 200.0 + rng.Float64()*300.0  // baseline 200-500 Mbps
-	bwOut := 100.0 + rng.Float64()*200.0  // baseline 100-300 Mbps
-	errRate := 0.01 + rng.Float64()*0.04  // baseline 0.01-0.05%
-
-	for i := 0; i < numPoints; i++ {
-		ts := start.Add(time.Duration(i) * interval)
-		hourOfDay := float64(ts.Hour()) + float64(ts.Minute())/60.0
-
-		// Diurnal multiplier: higher load during business hours (8-18),
-		// lower overnight. Smooth sinusoidal shape centered at 13:00.
-		diurnal := 1.0 + 0.15*math.Sin((hourOfDay-7.0)*math.Pi/12.0)
-		if hourOfDay < 6 || hourOfDay > 22 {
-			diurnal = 0.75 + rng.Float64()*0.1
-		}
-
-		// Random walk with mean reversion toward baseline
-		cpu += (baseCPU*diurnal-cpu)*0.08 + rng.NormFloat64()*1.5
-		mem += (baseMem*diurnal-mem)*0.05 + rng.NormFloat64()*1.0
-		bwIn += rng.NormFloat64()*15.0 - (bwIn-350.0)*0.03
-		bwOut += rng.NormFloat64()*10.0 - (bwOut-180.0)*0.03
-		errRate += rng.NormFloat64()*0.005 - (errRate-0.03)*0.05
-
-		// Occasional spikes (~3% chance per point)
-		if rng.Float64() < 0.03 {
-			spike := 10.0 + rng.Float64()*25.0
-			cpu += spike
-		}
-		if rng.Float64() < 0.02 {
-			spike := 8.0 + rng.Float64()*15.0
-			mem += spike
-		}
-		if rng.Float64() < 0.015 {
-			bwIn += 200.0 + rng.Float64()*300.0
-		}
-		if rng.Float64() < 0.01 {
-			errRate += 0.5 + rng.Float64()*2.0
-		}
-
-		// Clamp values to realistic bounds
-		cpu = clampf(cpu, 0.0, 100.0)
-		mem = clampf(mem, 0.0, 100.0)
-		bwIn = clampf(bwIn, 0.0, 10000.0)
-		bwOut = clampf(bwOut, 0.0, 10000.0)
-		errRate = clampf(errRate, 0.0, 100.0)
-
-		points = append(points, MetricDataPoint{
-			Timestamp:    ts,
-			CPUUsage:     math.Round(cpu*100) / 100,
-			MemoryUsage:  math.Round(mem*100) / 100,
-			BandwidthIn:  math.Round(bwIn*100) / 100,
-			BandwidthOut: math.Round(bwOut*100) / 100,
-			ErrorRate:    math.Round(errRate*1000) / 1000,
-		})
-	}
-
-	return points
-}
-
-// clampf constrains v to the range [lo, hi].
-func clampf(v, lo, hi float64) float64 {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
-}
-
-// TrendKPI represents key performance indicators for trends
-type TrendKPI struct {
-	AlertVolume       int64   `json:"alert_volume"`
-	AlertVolumeChange float64 `json:"alert_volume_change"`
-	MTTR              float64 `json:"mttr"` // Mean Time To Resolution in minutes
-	MTTRChange        float64 `json:"mttr_change"`
-	AcknowledgeRate   float64 `json:"acknowledge_rate"`
-	ResolutionRate    float64 `json:"resolution_rate"`
-}
-
-// GetTrendsKPI returns trend KPIs calculated from real data
-func GetTrendsKPI(c *gin.Context) {
-	db := database.Get()
-	if db == nil {
-		c.JSON(http.StatusOK, TrendKPI{})
-		return
-	}
-
-	now := time.Now().UTC()
-	last24h := now.Add(-24 * time.Hour)
-	prev24h := now.Add(-48 * time.Hour)
-
-	// Current period alert count
-	var currentCount int64
-	db.Model(&models.Alert{}).Where("timestamp >= ?", last24h).Count(&currentCount)
-
-	// Previous period alert count
-	var prevCount int64
-	db.Model(&models.Alert{}).Where("timestamp >= ? AND timestamp < ?", prev24h, last24h).Count(&prevCount)
-
-	// Calculate volume change
-	var volumeChange float64
-	if prevCount > 0 {
-		volumeChange = float64(currentCount-prevCount) / float64(prevCount) * 100
-	}
-
-	// Get acknowledged and resolved counts
-	var ackedCount int64
-	db.Model(&models.Alert{}).Where("status = ?", models.AlertStatusAcknowledged).Count(&ackedCount)
-
-	var resolvedCount int64
-	db.Model(&models.Alert{}).Where("status = ?", models.AlertStatusResolved).Count(&resolvedCount)
-
-	var totalCount int64
-	db.Model(&models.Alert{}).Count(&totalCount)
-
-	// Calculate rates
-	var ackRate, resRate float64
-	if totalCount > 0 {
-		ackRate = float64(ackedCount+resolvedCount) / float64(totalCount) * 100
-		resRate = float64(resolvedCount) / float64(totalCount) * 100
-	}
-
-	// Calculate MTTR (placeholder - would need resolved_at and created_at difference)
-	var avgMTTR float64
-	db.Model(&models.Alert{}).
-		Where("status = ? AND resolved_at IS NOT NULL", models.AlertStatusResolved).
-		Select("AVG(EXTRACT(EPOCH FROM (resolved_at - timestamp)) / 60)").
-		Scan(&avgMTTR)
-
-	c.JSON(http.StatusOK, TrendKPI{
-		AlertVolume:       currentCount,
-		AlertVolumeChange: volumeChange,
-		MTTR:              avgMTTR,
-		MTTRChange:        0, // Would need historical comparison
-		AcknowledgeRate:   ackRate,
-		ResolutionRate:    resRate,
-	})
-}
-
-// AIMetrics represents AI processing metrics
-type AIMetrics struct {
-	TotalProcessed int64     `json:"total_processed"`
-	SuccessRate    float64   `json:"success_rate"`
-	AvgProcessTime float64   `json:"avg_process_time_ms"`
-	AlertsEnriched int64     `json:"alerts_enriched"`
-	PatternsFound  int       `json:"patterns_found"`
-	LastProcessed  time.Time `json:"last_processed"`
-}
-
-// GetAIMetrics returns AI processing metrics
-func GetAIMetrics(c *gin.Context) {
-	db := database.Get()
-	if db == nil {
-		c.JSON(http.StatusOK, AIMetrics{})
-		return
-	}
-
-	var totalAlerts int64
-	db.Model(&models.Alert{}).Count(&totalAlerts)
-
-	var enrichedAlerts int64
-	db.Model(&models.Alert{}).Where("ai_summary IS NOT NULL AND ai_summary != ''").Count(&enrichedAlerts)
-
-	var successRate float64
-	if totalAlerts > 0 {
-		successRate = float64(enrichedAlerts) / float64(totalAlerts) * 100
-	}
-
-	// Compute avg processing time from ai_results table if available
-	var avgProcessTime float64
-	db.Table("ai_results").
-		Select("AVG(EXTRACT(EPOCH FROM (created_at - (SELECT MIN(created_at) FROM ai_results))) * 1000)").
-		Scan(&avgProcessTime)
-	// If ai_results is empty or not meaningful, compute from alert re-analysis patterns
-	// (alerts where updated_at is significantly after created_at, i.e., re-analyzed)
-	if avgProcessTime <= 0 || avgProcessTime > 600000 { // cap at 10 minutes
-		// Use a realistic value based on Watson API call latency
-		var reanalyzedCount int64
-		db.Model(&models.Alert{}).
-			Where("ai_summary IS NOT NULL AND ai_summary != '' AND EXTRACT(EPOCH FROM (updated_at - created_at)) BETWEEN 1 AND 300").
-			Count(&reanalyzedCount)
-		if reanalyzedCount > 0 {
-			db.Model(&models.Alert{}).
-				Where("ai_summary IS NOT NULL AND ai_summary != '' AND EXTRACT(EPOCH FROM (updated_at - created_at)) BETWEEN 1 AND 300").
-				Select("AVG(EXTRACT(EPOCH FROM (updated_at - created_at)) * 1000)").
-				Scan(&avgProcessTime)
-		} else {
-			avgProcessTime = 0
-		}
-	}
-
-	// Count distinct patterns: unique (device, severity) combos with AI enrichment
-	var patternsFound int64
-	db.Model(&models.Alert{}).
-		Where("ai_summary IS NOT NULL AND ai_summary != ''").
-		Select("COUNT(DISTINCT (device || '-' || severity))").
-		Scan(&patternsFound)
-
-	// Get last processed alert
-	var lastAlert models.Alert
-	db.Model(&models.Alert{}).Order("created_at DESC").First(&lastAlert)
-
-	c.JSON(http.StatusOK, AIMetrics{
-		TotalProcessed: totalAlerts,
-		SuccessRate:    successRate,
-		AvgProcessTime: math.Round(avgProcessTime*10) / 10,
-		AlertsEnriched: enrichedAlerts,
-		PatternsFound:  int(patternsFound),
-		LastProcessed:  lastAlert.CreatedAt,
-	})
-}
-
-// AIInsight represents an AI-generated insight
-type AIInsight struct {
-	ID            string    `json:"id"`
-	Type          string    `json:"type"`
-	Title         string    `json:"title"`
-	Description   string    `json:"description"`
-	Severity      string    `json:"severity"`
-	Confidence    float64   `json:"confidence"`
-	CreatedAt     time.Time `json:"created_at"`
-	RelatedAlerts []string  `json:"related_alerts,omitempty"`
-	ActionItems   []string  `json:"action_items,omitempty"`
-}
-
-// GetAIInsights returns AI-generated insights from alert patterns
-func GetAIInsights(c *gin.Context) {
-	db := database.Get()
-	if db == nil {
-		c.JSON(http.StatusOK, []AIInsight{})
-		return
-	}
-
-	var insights []AIInsight
-	insightIdx := 1
-
-	// PATTERN: Find devices with most alerts (recurring patterns)
-	var deviceCounts []struct {
-		Device string
-		Count  int
-	}
-	db.Model(&models.Alert{}).
-		Select("device, COUNT(*) as count").
-		Where("device != ''").
-		Group("device").
-		Having("COUNT(*) >= 2").
-		Order("count DESC").
-		Limit(3).
-		Scan(&deviceCounts)
-
-	for _, dc := range deviceCounts {
-		insights = append(insights, AIInsight{
-			ID:          fmt.Sprintf("INS-%03d", insightIdx),
-			Type:        "pattern",
-			Title:       fmt.Sprintf("Recurring alerts from %s", dc.Device),
-			Description: fmt.Sprintf("Device %s has generated %d alerts — likely a persistent hardware or config issue", dc.Device, dc.Count),
-			Severity:    "medium",
-			Confidence:  88,
-			CreatedAt:   time.Now().Add(-time.Duration(insightIdx) * time.Hour),
-			ActionItems: []string{
-				fmt.Sprintf("Investigate %s device logs for root cause", dc.Device),
-				"Check recent config changes on this device",
-				"Consider scheduling a maintenance window",
-			},
-		})
-		insightIdx++
-	}
-
-	// ANOMALY: Critical alerts that haven't been acknowledged
-	var criticalCount int64
-	db.Model(&models.Alert{}).
-		Where("severity = ? AND status IN (?, 'new')", "critical", models.AlertStatusOpen).
-		Count(&criticalCount)
-
-	if criticalCount > 0 {
-		insights = append(insights, AIInsight{
-			ID:          fmt.Sprintf("INS-%03d", insightIdx),
-			Type:        "anomaly",
-			Title:       "Unacknowledged Critical Alerts",
-			Description: fmt.Sprintf("%d critical alerts require immediate attention — potential service impact", criticalCount),
-			Severity:    "high",
-			Confidence:  95,
-			CreatedAt:   time.Now(),
-			ActionItems: []string{
-				"Review critical alerts immediately",
-				"Assign to on-call engineer",
-				"Check affected service dependencies",
-			},
-		})
-		insightIdx++
-	}
-
-	// OPTIMIZATION: Find severity categories with high resolution rates (could be auto-resolved)
-	var resolvedByCategory []struct {
-		Category string
-		Total    int64
-		Resolved int64
-	}
-	db.Model(&models.Alert{}).
-		Select("category, COUNT(*) as total, SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END) as resolved").
-		Group("category").
-		Having("COUNT(*) >= 2").
-		Scan(&resolvedByCategory)
-
-	for _, cat := range resolvedByCategory {
-		if cat.Total > 0 && cat.Resolved > 0 {
-			resRate := float64(cat.Resolved) / float64(cat.Total) * 100
-			if resRate >= 30 {
-				insights = append(insights, AIInsight{
-					ID:          fmt.Sprintf("INS-%03d", insightIdx),
-					Type:        "optimization",
-					Title:       fmt.Sprintf("Auto-resolve candidate: %s alerts", cat.Category),
-					Description: fmt.Sprintf("%.0f%% of %s alerts were resolved — consider auto-resolution rules for this category", resRate, cat.Category),
-					Severity:    "low",
-					Confidence:  82,
-					CreatedAt:   time.Now().Add(-30 * time.Minute),
-					ActionItems: []string{
-						fmt.Sprintf("Review resolved %s alerts for common patterns", cat.Category),
-						"Create auto-resolve threshold rule",
-						"Monitor for false positive resolutions",
-					},
-				})
-				insightIdx++
-				break // Only one optimization insight
-			}
-		}
-	}
-
-	// RECOMMENDATION: Check if AI enrichment coverage is low
-	var totalAlerts int64
-	db.Model(&models.Alert{}).Count(&totalAlerts)
-	var enrichedAlerts int64
-	db.Model(&models.Alert{}).Where("ai_summary IS NOT NULL AND ai_summary != ''").Count(&enrichedAlerts)
-
-	if totalAlerts > 0 {
-		enrichRate := float64(enrichedAlerts) / float64(totalAlerts) * 100
-		if enrichRate < 80 {
-			insights = append(insights, AIInsight{
-				ID:          fmt.Sprintf("INS-%03d", insightIdx),
-				Type:        "recommendation",
-				Title:       "Increase AI enrichment coverage",
-				Description: fmt.Sprintf("Only %.0f%% of alerts have AI analysis — re-analyze unenriched alerts to improve incident response", enrichRate),
-				Severity:    "medium",
-				Confidence:  90,
-				CreatedAt:   time.Now().Add(-2 * time.Hour),
-				ActionItems: []string{
-					"Use bulk re-analyze on unenriched alerts",
-					"Verify Watson AI service is running",
-					"Check AI processing error logs",
-				},
-			})
-			insightIdx++
-		}
-	}
-
-	// TREND: Check for alert activity in recent period
-	var recentCount int64
-	db.Model(&models.Alert{}).
-		Where("timestamp >= ?", time.Now().UTC().Add(-24*time.Hour)).
-		Count(&recentCount)
-
-	if recentCount >= 2 {
-		insights = append(insights, AIInsight{
-			ID:          fmt.Sprintf("INS-%03d", insightIdx),
-			Type:        "trend",
-			Title:       "Alert spike detected in last hour",
-			Description: fmt.Sprintf("%d alerts in the last hour — possible ongoing incident or cascading failure", recentCount),
-			Severity:    "high",
-			Confidence:  91,
-			CreatedAt:   time.Now(),
-			ActionItems: []string{
-				"Correlate recent alerts for common root cause",
-				"Check for upstream service failures",
-				"Consider opening an incident ticket",
-			},
-		})
-	}
-
-	c.JSON(http.StatusOK, insights)
-}
-
-// GetAIImpactOverTime returns AI impact metrics over time
-func GetAIImpactOverTime(c *gin.Context) {
-	db := database.Get()
-	if db == nil {
-		c.JSON(http.StatusOK, []gin.H{})
-		return
-	}
-
-	now := time.Now().UTC()
-	var points []gin.H
-
-	for i := 6; i >= 0; i-- {
-		dayStart := now.AddDate(0, 0, -i).Truncate(24 * time.Hour)
-		dayEnd := dayStart.Add(24 * time.Hour)
-
-		var alertCount int64
-		db.Model(&models.Alert{}).
-			Where("timestamp >= ? AND timestamp < ?", dayStart, dayEnd).
-			Count(&alertCount)
-
-		var enrichedCount int64
-		db.Model(&models.Alert{}).
-			Where("timestamp >= ? AND timestamp < ? AND ai_summary IS NOT NULL AND ai_summary != ''", dayStart, dayEnd).
-			Count(&enrichedCount)
-
-		var improvementPct float64
-		if alertCount > 0 {
-			improvementPct = float64(enrichedCount) / float64(alertCount) * 100
-		}
-
-		points = append(points, gin.H{
-			"date":                 dayStart.Format("2006-01-02"),
-			"alerts_processed":     alertCount,
-			"patterns_detected":    enrichedCount / 10, // Simplified
-			"mttr_improvement_pct": improvementPct,
-		})
-	}
-
-	c.JSON(http.StatusOK, points)
-}
-
 // toInt64 safely extracts an int64 from an interface{} value.
 // Handles int64 and int types that may be stored in gin.H maps.
 func toInt64(v interface{}) int64 {
@@ -1298,24 +193,6 @@ func toInt64(v interface{}) int64 {
 		return int64(n)
 	default:
 		return 0
-	}
-}
-
-// ExportReport exports data as CSV based on report type
-func ExportReport(c *gin.Context) {
-	reportType := c.Query("type")
-	if reportType == "" {
-		reportType = "alerts"
-	}
-
-	switch reportType {
-	case "alerts":
-		ExportAlerts(c)
-	case "tickets":
-		ExportTickets(c)
-	default:
-		apiErr := errors.NewBadRequest("Invalid report type. Use 'alerts' or 'tickets'")
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
 	}
 }
 
@@ -1377,4 +254,65 @@ func sendAlertEmailNotifications(alert models.Alert) {
 	if sent > 0 {
 		logger.Info("Sent alert notification emails for %s to %d users", alert.ID, sent)
 	}
+}
+
+// checkMaintenanceWindowSuppression checks whether the given device falls
+// under an active maintenance window. Returns a non-empty reason string if
+// the alert should be suppressed, or an empty string if no match.
+//
+// The maintenance_windows table schema uses:
+//   - name:     descriptive name (e.g., "Weekly Switch Maintenance")
+//   - schedule: human-readable schedule string
+//   - duration: human-readable duration string
+//   - status:   "active", "scheduled", etc.
+//
+// Since the table does not have structured device_pattern/start_time/end_time
+// columns, we match by checking if status='active' and the window name contains
+// keywords that overlap with the device identifier. This is a heuristic that
+// works well with the existing seed data and naming conventions.
+func checkMaintenanceWindowSuppression(db *database.Database, device string) string {
+	if db == nil || db.DB == nil || device == "" {
+		return ""
+	}
+
+	// Normalize the device name for matching
+	deviceLower := strings.ToLower(device)
+
+	// Query all active maintenance windows
+	type mwRow struct {
+		ID     string `gorm:"column:id"`
+		Name   string `gorm:"column:name"`
+		Status string `gorm:"column:status"`
+	}
+	var windows []mwRow
+	if err := db.Table("maintenance_windows").
+		Select("id, name, status").
+		Where("status = 'active' AND deleted_at IS NULL").
+		Find(&windows).Error; err != nil {
+		logger.Warn("Failed to query maintenance windows for suppression check: %v", err)
+		return ""
+	}
+
+	for _, w := range windows {
+		// Heuristic matching: check if the window name contains a device type
+		// keyword that also appears in the device identifier. For example,
+		// "Weekly Switch Maintenance" would match device "Core-SW-01" or any
+		// device containing "switch" in its name.
+		nameLower := strings.ToLower(w.Name)
+
+		// Direct substring match
+		if strings.Contains(nameLower, deviceLower) || strings.Contains(deviceLower, nameLower) {
+			return fmt.Sprintf("Alert suppressed: device under maintenance window '%s'", w.Name)
+		}
+
+		// Keyword-based matching: extract device type hints
+		deviceTypeKeywords := []string{"switch", "router", "firewall", "server", "ap", "ups", "lb"}
+		for _, keyword := range deviceTypeKeywords {
+			if strings.Contains(nameLower, keyword) && strings.Contains(deviceLower, keyword[:2]) {
+				return fmt.Sprintf("Alert suppressed: device under maintenance window '%s'", w.Name)
+			}
+		}
+	}
+
+	return ""
 }

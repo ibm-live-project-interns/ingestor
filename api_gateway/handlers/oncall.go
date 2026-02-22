@@ -6,7 +6,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/ibm-live-project-interns/ingestor/shared/database"
 	"github.com/ibm-live-project-interns/ingestor/shared/logger"
+	"github.com/ibm-live-project-interns/ingestor/shared/models"
 )
 
 // ==========================================
@@ -221,16 +223,60 @@ func getDemoOverrides() []ScheduleOverride {
 // Handlers
 // ==========================================
 
-// GetCurrentOnCall returns the people currently on call
+// GetCurrentOnCall returns the people currently on call.
+// Queries the real on_call_schedules table first; falls back to demo data
+// if the database is unavailable or if DEMO_MODE=true.
 // GET /api/v1/on-call/current
 func GetCurrentOnCall(c *gin.Context) {
 	// No admin restriction -- all authenticated users can view who is on call
 
-	// No on-call database table exists yet, so always return demo data.
-	// When a real table is created, add a repo check here following the same
-	// pattern as userRepo() / auditRepo(): return nil => demo mode.
-	logger.Info("On-Call: returning current on-call data (demo mode)")
+	db := database.Get()
+	if db != nil && db.DB != nil {
+		now := time.Now().UTC()
+		var schedules []models.OnCallSchedule
+		err := db.Where("start_time <= ? AND end_time >= ?", now, now).
+			Order("is_primary DESC, username ASC").
+			Find(&schedules).Error
 
+		if err == nil && len(schedules) > 0 {
+			// Convert DB schedules to the OnCallPerson response format
+			currentOnCall := make([]OnCallPerson, 0, len(schedules))
+			for _, s := range schedules {
+				shiftType := "Day Shift"
+				hour := now.Hour()
+				if hour >= 18 || hour < 6 {
+					shiftType = "Night Shift"
+				}
+
+				currentOnCall = append(currentOnCall, OnCallPerson{
+					ID:        s.UserID,
+					Name:      s.Username,
+					Role:      s.RotationType + " rotation",
+					Team:      "On-Call",
+					ShiftType: shiftType,
+					StartTime: s.StartTime.Format(time.RFC3339),
+					EndTime:   s.EndTime.Format(time.RFC3339),
+					Status:    "active",
+				})
+			}
+
+			logger.Info("On-Call: returning %d active schedules from database", len(currentOnCall))
+			c.JSON(http.StatusOK, gin.H{
+				"on_call":   currentOnCall,
+				"total":     len(currentOnCall),
+				"timestamp": now.Format(time.RFC3339),
+			})
+			return
+		}
+
+		// DB available but no active schedules found; fall through to demo data
+		if err != nil {
+			logger.Warn("On-Call: database query failed: %v, falling back to demo data", err)
+		}
+	}
+
+	// Demo data fallback
+	logger.Info("On-Call: returning current on-call data (demo mode)")
 	currentOnCall := getDemoCurrentOnCall()
 
 	c.JSON(http.StatusOK, gin.H{

@@ -163,8 +163,12 @@ func getDemoSLATrend() gin.H {
 func GetSLAOverview(c *gin.Context) {
 	repo := alertRepo()
 	if repo == nil {
-		logger.Info("Demo mode: returning demo SLA overview")
-		c.JSON(http.StatusOK, getDemoSLAOverview())
+		if isDemoMode() {
+			logger.Info("Demo mode: returning demo SLA overview")
+			c.JSON(http.StatusOK, getDemoSLAOverview())
+			return
+		}
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Service temporarily unavailable"})
 		return
 	}
 
@@ -302,8 +306,12 @@ func GetSLAOverview(c *gin.Context) {
 func GetSLAViolations(c *gin.Context) {
 	repo := alertRepo()
 	if repo == nil {
-		logger.Info("Demo mode: returning demo SLA violations")
-		c.JSON(http.StatusOK, getDemoSLAViolations())
+		if isDemoMode() {
+			logger.Info("Demo mode: returning demo SLA violations")
+			c.JSON(http.StatusOK, getDemoSLAViolations())
+			return
+		}
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Service temporarily unavailable"})
 		return
 	}
 
@@ -371,8 +379,12 @@ func GetSLAViolations(c *gin.Context) {
 func GetSLATrend(c *gin.Context) {
 	repo := alertRepo()
 	if repo == nil {
-		logger.Info("Demo mode: returning demo SLA trend")
-		c.JSON(http.StatusOK, getDemoSLATrend())
+		if isDemoMode() {
+			logger.Info("Demo mode: returning demo SLA trend")
+			c.JSON(http.StatusOK, getDemoSLATrend())
+			return
+		}
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Service temporarily unavailable"})
 		return
 	}
 
@@ -470,14 +482,19 @@ func GetSLATrend(c *gin.Context) {
 	})
 }
 
-// fetchAlertsInPeriod retrieves all alerts from the given start time to now.
-// It uses the repository's List method with time filtering.
+// maxSLAAlerts is the hard cap on alerts fetched for SLA computation
+// to prevent OOM on large datasets.
+const maxSLAAlerts = 10000
+
+// fetchAlertsInPeriod retrieves alerts from the given start time to now.
+// It uses the repository's List method with time filtering and a hard cap
+// of maxSLAAlerts to prevent unbounded memory consumption.
 func fetchAlertsInPeriod(repo *database.AlertRepository, since time.Time) ([]models.Alert, error) {
 	now := time.Now().UTC()
 	filter := database.AlertFilter{
 		From:  &since,
 		To:    &now,
-		Limit: 0, // No limit - we need all for accurate computation
+		Limit: maxSLAAlerts,
 	}
 
 	alerts, _, err := repo.List(filter)

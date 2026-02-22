@@ -1,8 +1,6 @@
 package handlers
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -96,6 +94,15 @@ func isAdminRole(c *gin.Context) bool {
 	return rbac.RoleID(roleStr) == rbac.RoleSysAdmin
 }
 
+// UpdateUserRequest represents the request to update a user
+type UpdateUserRequest struct {
+	FirstName string `json:"first_name,omitempty"`
+	LastName  string `json:"last_name,omitempty"`
+	Email     string `json:"email,omitempty"`
+	Role      string `json:"role,omitempty"`
+	IsActive  *bool  `json:"is_active,omitempty"`
+}
+
 // GetUsers returns all users with optional filtering and pagination
 func GetUsers(c *gin.Context) {
 	// Verify admin access
@@ -107,13 +114,16 @@ func GetUsers(c *gin.Context) {
 
 	repo := userRepo()
 	if repo == nil {
-		// Demo mode - return demo users
-		demoUsers := getDemoUsers()
-		logger.Info("Demo mode: returning demo users")
-		c.JSON(http.StatusOK, gin.H{
-			"users": demoUsers,
-			"total": len(demoUsers),
-		})
+		if isDemoMode() {
+			demoUsers := getDemoUsers()
+			logger.Info("Demo mode: returning demo users")
+			c.JSON(http.StatusOK, gin.H{
+				"users": demoUsers,
+				"total": len(demoUsers),
+			})
+			return
+		}
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Service temporarily unavailable"})
 		return
 	}
 
@@ -172,15 +182,18 @@ func GetUserByID(c *gin.Context) {
 
 	repo := userRepo()
 	if repo == nil {
-		// Demo mode - find in demo users
-		for _, user := range getDemoUsers() {
-			if user.ID == uint(id) {
-				c.JSON(http.StatusOK, user)
-				return
+		if isDemoMode() {
+			for _, user := range getDemoUsers() {
+				if user.ID == uint(id) {
+					c.JSON(http.StatusOK, user)
+					return
+				}
 			}
+			apiErr := errors.NewNotFound(fmt.Sprintf("user %d", id))
+			c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
+			return
 		}
-		apiErr := errors.NewNotFound(fmt.Sprintf("user %d", id))
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Service temporarily unavailable"})
 		return
 	}
 
@@ -198,15 +211,6 @@ func GetUserByID(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, user.ToResponse())
-}
-
-// UpdateUserRequest represents the request to update a user
-type UpdateUserRequest struct {
-	FirstName string `json:"first_name,omitempty"`
-	LastName  string `json:"last_name,omitempty"`
-	Email     string `json:"email,omitempty"`
-	Role      string `json:"role,omitempty"`
-	IsActive  *bool  `json:"is_active,omitempty"`
 }
 
 // UpdateUser updates an existing user
@@ -235,21 +239,24 @@ func UpdateUser(c *gin.Context) {
 
 	repo := userRepo()
 	if repo == nil {
-		// Demo mode - return success with mock data
-		logger.Info("Demo mode: User %d updated", id)
-		writeAuditLog(c, "user.update", "user", fmt.Sprintf("%d", id),
-			fmt.Sprintf("User %d updated (demo mode)", id))
-		c.JSON(http.StatusOK, gin.H{
-			"message": "User updated successfully (demo mode)",
-			"user": models.UserResponse{
-				ID:        uint(id),
-				Email:     req.Email,
-				FirstName: req.FirstName,
-				LastName:  req.LastName,
-				Role:      req.Role,
-				CreatedAt: time.Now().Add(-24 * time.Hour),
-			},
-		})
+		if isDemoMode() {
+			logger.Info("Demo mode: User %d updated", id)
+			writeAuditLog(c, "user.update", "user", fmt.Sprintf("%d", id),
+				fmt.Sprintf("User %d updated (demo mode)", id))
+			c.JSON(http.StatusOK, gin.H{
+				"message": "User updated successfully (demo mode)",
+				"user": models.UserResponse{
+					ID:        uint(id),
+					Email:     req.Email,
+					FirstName: req.FirstName,
+					LastName:  req.LastName,
+					Role:      req.Role,
+					CreatedAt: time.Now().Add(-24 * time.Hour),
+				},
+			})
+			return
+		}
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Service temporarily unavailable"})
 		return
 	}
 
@@ -362,10 +369,10 @@ func UpdateUser(c *gin.Context) {
 			// Account deactivated
 			if req.IsActive != nil && !*req.IsActive && user.IsActive {
 				custom := map[string]interface{}{
-					"Reason":       "Deactivated by administrator",
+					"Reason":        "Deactivated by administrator",
 					"DeactivatedBy": adminUsername,
-					"Timestamp":    time.Now().Format("Jan 2, 2006 3:04 PM"),
-					"ActionURL":    fmt.Sprintf("%s/login", services.Email.FrontendURL()),
+					"Timestamp":     time.Now().Format("Jan 2, 2006 3:04 PM"),
+					"ActionURL":     fmt.Sprintf("%s/login", services.Email.FrontendURL()),
 				}
 				subject := "Your account has been deactivated"
 				if err := services.Email.SendNotification(user.Email, user.Username, subject, "account-deactivated", custom); err != nil {
@@ -390,243 +397,4 @@ func UpdateUser(c *gin.Context) {
 		"message": "User updated successfully",
 		"user":    updatedUser.ToResponse(),
 	})
-}
-
-// DeleteUser soft deletes a user
-func DeleteUser(c *gin.Context) {
-	// Verify admin access
-	if !isAdminRole(c) {
-		apiErr := errors.NewInsufficientRole(string(rbac.RoleSysAdmin))
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	idStr := c.Param("id")
-	id, err := strconv.ParseUint(idStr, 10, 32)
-	if err != nil {
-		apiErr := errors.NewValidation("Invalid user ID: must be a positive integer")
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	// Prevent admin from deleting themselves
-	currentUserID, _ := c.Get("userID")
-	if currentUID, ok := currentUserID.(uint); ok && currentUID == uint(id) {
-		apiErr := errors.NewBadRequest("Cannot delete your own account")
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	repo := userRepo()
-	if repo == nil {
-		// Demo mode - return success
-		logger.Info("Demo mode: User %d deleted", id)
-		writeAuditLog(c, "user.delete", "user", fmt.Sprintf("%d", id),
-			fmt.Sprintf("User %d deleted (demo mode)", id))
-		c.JSON(http.StatusOK, gin.H{
-			"message": "User deleted successfully (demo mode)",
-			"user_id": id,
-		})
-		return
-	}
-
-	// Check if user exists
-	user, err := repo.GetByID(uint(id))
-	if err != nil {
-		apiErr := errors.NewDatabaseError("query", err)
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-	if user == nil {
-		apiErr := errors.NewNotFound(fmt.Sprintf("user %d", id))
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	// Soft delete the user
-	if err := repo.SoftDelete(uint(id)); err != nil {
-		apiErr := errors.NewDatabaseError("delete", err)
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	// Invalidate all sessions for the deleted user
-	db := database.Get()
-	if db != nil && db.DB != nil {
-		sessionRepo := database.NewSessionRepository(db.DB)
-		if err := sessionRepo.InvalidateAllForUser(uint(id)); err != nil {
-			logger.Error("Failed to invalidate sessions for deleted user %d: %v", id, err)
-		}
-	}
-
-	username, _ := c.Get("username")
-	logger.Info("User %d deleted by %v", id, username)
-
-	// Record deletion in the audit log for compliance tracking
-	writeAuditLog(c, "user.delete", "user", fmt.Sprintf("%d", id),
-		fmt.Sprintf("User %d (%s) deleted by %v", id, user.Email, username))
-
-	// Send account-deactivated email notification (non-blocking)
-	if services.Email != nil {
-		go func() {
-			adminUsername := fmt.Sprintf("%v", username)
-			custom := map[string]interface{}{
-				"Reason":        "Account deleted by administrator",
-				"DeactivatedBy": adminUsername,
-				"Timestamp":     time.Now().Format("Jan 2, 2006 3:04 PM"),
-				"ActionURL":     fmt.Sprintf("%s/login", services.Email.FrontendURL()),
-			}
-			subject := "Your account has been deactivated"
-			if err := services.Email.SendNotification(user.Email, user.Username, subject, "account-deactivated", custom); err != nil {
-				logger.Warn("Failed to send account-deactivated email to %s: %v", user.Email, err)
-			}
-		}()
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"message": "User deleted successfully",
-		"user_id": id,
-	})
-}
-
-// ResetUserPassword resets a user's password (admin action)
-func ResetUserPassword(c *gin.Context) {
-	// Verify admin access
-	if !isAdminRole(c) {
-		apiErr := errors.NewInsufficientRole(string(rbac.RoleSysAdmin))
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	idStr := c.Param("id")
-	id, err := strconv.ParseUint(idStr, 10, 32)
-	if err != nil {
-		apiErr := errors.NewValidation("Invalid user ID: must be a positive integer")
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	// Optional: accept a new password in the request body
-	var req struct {
-		NewPassword string `json:"new_password,omitempty"`
-	}
-	// Bind is optional - if no body, generate a random password
-	_ = c.ShouldBindJSON(&req)
-
-	repo := userRepo()
-	if repo == nil {
-		// Demo mode - return success with a generated temporary password
-		logger.Info("Demo mode: Password reset for user %d", id)
-		writeAuditLog(c, "user.password_reset", "user", fmt.Sprintf("%d", id),
-			fmt.Sprintf("Admin password reset for user %d (demo mode)", id))
-		c.JSON(http.StatusOK, gin.H{
-			"message":            "Password reset successfully (demo mode)",
-			"user_id":            id,
-			"temporary_password": "demo-temp-pass-123",
-		})
-		return
-	}
-
-	// Check if user exists
-	user, err := repo.GetByID(uint(id))
-	if err != nil {
-		apiErr := errors.NewDatabaseError("query", err)
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-	if user == nil {
-		apiErr := errors.NewNotFound(fmt.Sprintf("user %d", id))
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	// Generate or use provided password
-	newPassword := req.NewPassword
-	isGenerated := false
-	if newPassword == "" {
-		// Generate a random temporary password
-		passwordBytes := make([]byte, 16)
-		if _, err := rand.Read(passwordBytes); err != nil {
-			apiErr := errors.NewInternal("Failed to generate temporary password")
-			c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-			return
-		}
-		newPassword = hex.EncodeToString(passwordBytes)[:16]
-		isGenerated = true
-	}
-
-	// Validate password length
-	if len(newPassword) < 8 {
-		apiErr := errors.NewValidation("Password must be at least 8 characters long")
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	// Hash the new password
-	hashedPassword, err := services.Auth.HashPassword(newPassword)
-	if err != nil {
-		apiErr := errors.NewInternal("Failed to hash password")
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	// Update the user's password and reset any lockout
-	user.Password = hashedPassword
-	user.FailedAttempts = 0
-	user.LockedUntil = nil
-	user.ResetToken = ""
-	user.ResetTokenExp = nil
-
-	if err := repo.Update(user); err != nil {
-		apiErr := errors.NewDatabaseError("update", err)
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	// Invalidate all existing sessions for security
-	db := database.Get()
-	if db != nil && db.DB != nil {
-		sessionRepo := database.NewSessionRepository(db.DB)
-		if err := sessionRepo.InvalidateAllForUser(uint(id)); err != nil {
-			logger.Error("Failed to invalidate sessions for user %d after password reset: %v", id, err)
-		}
-	}
-
-	username, _ := c.Get("username")
-	logger.Info("Password reset for user %d by %v", id, username)
-
-	// Record password reset in the audit log for compliance tracking
-	writeAuditLog(c, "user.password_reset", "user", fmt.Sprintf("%d", id),
-		fmt.Sprintf("Admin password reset for user %d (%s) by %v", id, user.Email, username))
-
-	// Send password-reset-by-admin email notification (non-blocking)
-	if services.Email != nil {
-		go func() {
-			adminUsername := fmt.Sprintf("%v", username)
-			custom := map[string]interface{}{
-				"ResetBy":   adminUsername,
-				"Timestamp": time.Now().Format("Jan 2, 2006 3:04 PM"),
-				"ActionURL": fmt.Sprintf("%s/login", services.Email.FrontendURL()),
-			}
-			if isGenerated {
-				custom["TempPassword"] = newPassword
-			}
-			subject := "Your password has been reset by an administrator"
-			if err := services.Email.SendNotification(user.Email, user.Username, subject, "password-reset-by-admin", custom); err != nil {
-				logger.Warn("Failed to send password-reset-by-admin email to %s: %v", user.Email, err)
-			}
-		}()
-	}
-
-	response := gin.H{
-		"message": "Password reset successfully",
-		"user_id": id,
-	}
-
-	// Only include the temporary password in the response if it was generated
-	if isGenerated {
-		response["temporary_password"] = newPassword
-	}
-
-	c.JSON(http.StatusOK, response)
 }

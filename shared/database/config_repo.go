@@ -24,13 +24,37 @@ func NewConfigRepository(db *gorm.DB) *ConfigRepository {
 // Threshold Rules
 // ==========================================
 
+// ConfigPagination holds optional pagination parameters for config list queries.
+// When Limit is 0, no pagination is applied (all results returned).
+type ConfigPagination struct {
+	Limit  int
+	Offset int
+}
+
 func (r *ConfigRepository) ListRules() ([]models.ThresholdRule, error) {
+	rules, _, err := r.ListRulesPaginated(ConfigPagination{})
+	return rules, err
+}
+
+func (r *ConfigRepository) ListRulesPaginated(pg ConfigPagination) ([]models.ThresholdRule, int64, error) {
 	var rules []models.ThresholdRule
-	if err := r.db.Order("created_at DESC").Find(&rules).Error; err != nil {
-		logger.Error("Failed to list threshold rules: %v", err)
-		return nil, fmt.Errorf("failed to list rules: %w", err)
+	var total int64
+
+	query := r.db.Model(&models.ThresholdRule{})
+	if err := query.Count(&total).Error; err != nil {
+		logger.Error("Failed to count threshold rules: %v", err)
+		return nil, 0, fmt.Errorf("failed to count rules: %w", err)
 	}
-	return rules, nil
+
+	q := r.db.Order("created_at DESC")
+	if pg.Limit > 0 {
+		q = q.Limit(pg.Limit).Offset(pg.Offset)
+	}
+	if err := q.Find(&rules).Error; err != nil {
+		logger.Error("Failed to list threshold rules: %v", err)
+		return nil, 0, fmt.Errorf("failed to list rules: %w", err)
+	}
+	return rules, total, nil
 }
 
 func (r *ConfigRepository) GetRuleByID(id string) (*models.ThresholdRule, error) {
@@ -86,12 +110,29 @@ func (r *ConfigRepository) GenerateRuleID() (string, error) {
 // ==========================================
 
 func (r *ConfigRepository) ListChannels() ([]models.NotificationChannel, error) {
+	channels, _, err := r.ListChannelsPaginated(ConfigPagination{})
+	return channels, err
+}
+
+func (r *ConfigRepository) ListChannelsPaginated(pg ConfigPagination) ([]models.NotificationChannel, int64, error) {
 	var channels []models.NotificationChannel
-	if err := r.db.Order("created_at DESC").Find(&channels).Error; err != nil {
-		logger.Error("Failed to list channels: %v", err)
-		return nil, fmt.Errorf("failed to list channels: %w", err)
+	var total int64
+
+	query := r.db.Model(&models.NotificationChannel{})
+	if err := query.Count(&total).Error; err != nil {
+		logger.Error("Failed to count channels: %v", err)
+		return nil, 0, fmt.Errorf("failed to count channels: %w", err)
 	}
-	return channels, nil
+
+	q := r.db.Order("created_at DESC")
+	if pg.Limit > 0 {
+		q = q.Limit(pg.Limit).Offset(pg.Offset)
+	}
+	if err := q.Find(&channels).Error; err != nil {
+		logger.Error("Failed to list channels: %v", err)
+		return nil, 0, fmt.Errorf("failed to list channels: %w", err)
+	}
+	return channels, total, nil
 }
 
 func (r *ConfigRepository) GetChannelByID(id string) (*models.NotificationChannel, error) {
@@ -147,12 +188,29 @@ func (r *ConfigRepository) GenerateChannelID() (string, error) {
 // ==========================================
 
 func (r *ConfigRepository) ListPolicies() ([]models.EscalationPolicy, error) {
+	policies, _, err := r.ListPoliciesPaginated(ConfigPagination{})
+	return policies, err
+}
+
+func (r *ConfigRepository) ListPoliciesPaginated(pg ConfigPagination) ([]models.EscalationPolicy, int64, error) {
 	var policies []models.EscalationPolicy
-	if err := r.db.Order("created_at DESC").Find(&policies).Error; err != nil {
-		logger.Error("Failed to list policies: %v", err)
-		return nil, fmt.Errorf("failed to list policies: %w", err)
+	var total int64
+
+	query := r.db.Model(&models.EscalationPolicy{})
+	if err := query.Count(&total).Error; err != nil {
+		logger.Error("Failed to count policies: %v", err)
+		return nil, 0, fmt.Errorf("failed to count policies: %w", err)
 	}
-	return policies, nil
+
+	q := r.db.Order("created_at DESC")
+	if pg.Limit > 0 {
+		q = q.Limit(pg.Limit).Offset(pg.Offset)
+	}
+	if err := q.Find(&policies).Error; err != nil {
+		logger.Error("Failed to list policies: %v", err)
+		return nil, 0, fmt.Errorf("failed to list policies: %w", err)
+	}
+	return policies, total, nil
 }
 
 func (r *ConfigRepository) GetPolicyByID(id string) (*models.EscalationPolicy, error) {
@@ -208,12 +266,29 @@ func (r *ConfigRepository) GeneratePolicyID() (string, error) {
 // ==========================================
 
 func (r *ConfigRepository) ListWindows() ([]models.MaintenanceWindow, error) {
+	windows, _, err := r.ListWindowsPaginated(ConfigPagination{})
+	return windows, err
+}
+
+func (r *ConfigRepository) ListWindowsPaginated(pg ConfigPagination) ([]models.MaintenanceWindow, int64, error) {
 	var windows []models.MaintenanceWindow
-	if err := r.db.Order("created_at DESC").Find(&windows).Error; err != nil {
-		logger.Error("Failed to list maintenance windows: %v", err)
-		return nil, fmt.Errorf("failed to list windows: %w", err)
+	var total int64
+
+	query := r.db.Model(&models.MaintenanceWindow{})
+	if err := query.Count(&total).Error; err != nil {
+		logger.Error("Failed to count maintenance windows: %v", err)
+		return nil, 0, fmt.Errorf("failed to count windows: %w", err)
 	}
-	return windows, nil
+
+	q := r.db.Order("created_at DESC")
+	if pg.Limit > 0 {
+		q = q.Limit(pg.Limit).Offset(pg.Offset)
+	}
+	if err := q.Find(&windows).Error; err != nil {
+		logger.Error("Failed to list maintenance windows: %v", err)
+		return nil, 0, fmt.Errorf("failed to list windows: %w", err)
+	}
+	return windows, total, nil
 }
 
 func (r *ConfigRepository) GetWindowByID(id string) (*models.MaintenanceWindow, error) {

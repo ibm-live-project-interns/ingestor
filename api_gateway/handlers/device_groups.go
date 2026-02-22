@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -43,97 +42,26 @@ type AddDevicesToGroupRequest struct {
 }
 
 // ==========================================
-// Demo Data
-// ==========================================
-
-// deviceGroupMu protects demoDeviceGroups and nextDemoGroupID from concurrent access.
-var deviceGroupMu sync.RWMutex
-
-// nextDemoGroupID tracks the next ID suffix to assign in demo mode.
-var nextDemoGroupID = 6
-
-// getDefaultDeviceGroups returns realistic demo device groups.
-func getDefaultDeviceGroups() []DeviceGroup {
-	now := time.Now()
-	return []DeviceGroup{
-		{
-			ID:          "grp-001",
-			Name:        "Core Network",
-			Description: "Core switches and routers forming the network backbone",
-			Color:       "#4589ff",
-			DeviceIDs:   []string{"dev-001", "dev-004", "dev-007"},
-			DeviceCount: 3,
-			CreatedAt:   now.Add(-90 * 24 * time.Hour),
-			UpdatedAt:   now.Add(-2 * 24 * time.Hour),
-		},
-		{
-			ID:          "grp-002",
-			Name:        "DMZ / Security",
-			Description: "Firewalls and security appliances in the demilitarized zone",
-			Color:       "#da1e28",
-			DeviceIDs:   []string{"dev-002"},
-			DeviceCount: 1,
-			CreatedAt:   now.Add(-85 * 24 * time.Hour),
-			UpdatedAt:   now.Add(-5 * 24 * time.Hour),
-		},
-		{
-			ID:          "grp-003",
-			Name:        "Edge Routing",
-			Description: "Edge and border routers connecting to upstream ISPs",
-			Color:       "#198038",
-			DeviceIDs:   []string{"dev-003"},
-			DeviceCount: 1,
-			CreatedAt:   now.Add(-80 * 24 * time.Hour),
-			UpdatedAt:   now.Add(-10 * 24 * time.Hour),
-		},
-		{
-			ID:          "grp-004",
-			Name:        "Wireless Infrastructure",
-			Description: "Access points and wireless controllers across all floors",
-			Color:       "#8a3ffc",
-			DeviceIDs:   []string{"dev-005", "dev-006", "dev-010"},
-			DeviceCount: 3,
-			CreatedAt:   now.Add(-60 * 24 * time.Hour),
-			UpdatedAt:   now.Add(-1 * 24 * time.Hour),
-		},
-		{
-			ID:          "grp-005",
-			Name:        "Data Center",
-			Description: "Load balancers, UPS systems, and data center equipment",
-			Color:       "#ee5396",
-			DeviceIDs:   []string{"dev-008", "dev-009"},
-			DeviceCount: 2,
-			CreatedAt:   now.Add(-45 * 24 * time.Hour),
-			UpdatedAt:   now.Add(-3 * 24 * time.Hour),
-		},
-	}
-}
-
-// demoDeviceGroups holds the in-memory device group list for demo mode mutations.
-// All access must be protected by deviceGroupMu.
-var demoDeviceGroups []DeviceGroup
-
-// initDemoDeviceGroupsLocked ensures the demo data is initialized.
-// Caller MUST hold deviceGroupMu write lock before calling.
-func initDemoDeviceGroupsLocked() []DeviceGroup {
-	if demoDeviceGroups == nil {
-		demoDeviceGroups = getDefaultDeviceGroups()
-	}
-	return demoDeviceGroups
-}
-
-// ==========================================
 // Handlers
 // ==========================================
 
 // GetDeviceGroups returns all device groups with device counts.
 // GET /api/v1/device-groups
 func GetDeviceGroups(c *gin.Context) {
-	deviceGroupMu.Lock()
-	groups := initDemoDeviceGroupsLocked()
-	snapshot := make([]DeviceGroup, len(groups))
-	copy(snapshot, groups)
-	deviceGroupMu.Unlock()
+	ensureDemoDeviceGroupsInitialized()
+
+	deviceGroupMu.RLock()
+	snapshot := make([]DeviceGroup, len(demoDeviceGroups))
+	copy(snapshot, demoDeviceGroups)
+
+	// Collect all grouped device IDs (while we hold the read lock)
+	allGroupedDevices := map[string]bool{}
+	for _, g := range demoDeviceGroups {
+		for _, id := range g.DeviceIDs {
+			allGroupedDevices[id] = true
+		}
+	}
+	deviceGroupMu.RUnlock()
 
 	logger.Info("Demo mode: returning device groups (count=%d)", len(snapshot))
 
@@ -167,17 +95,6 @@ func GetDeviceGroups(c *gin.Context) {
 		}
 	}
 
-	// Collect all grouped device IDs to compute ungrouped count
-	allGroupedDevices := map[string]bool{}
-	deviceGroupMu.RLock()
-	allGroups := initDemoDeviceGroupsLocked()
-	for _, g := range allGroups {
-		for _, id := range g.DeviceIDs {
-			allGroupedDevices[id] = true
-		}
-	}
-	deviceGroupMu.RUnlock()
-
 	// Assume 10 total demo devices (dev-001 through dev-010)
 	totalKnownDevices := 10
 	ungroupedDevices := totalKnownDevices - len(allGroupedDevices)
@@ -208,18 +125,19 @@ func GetDeviceGroupByID(c *gin.Context) {
 		return
 	}
 
-	deviceGroupMu.Lock()
-	groups := initDemoDeviceGroupsLocked()
+	ensureDemoDeviceGroupsInitialized()
+
+	deviceGroupMu.RLock()
 	var found *DeviceGroup
-	for i := range groups {
-		if groups[i].ID == groupID {
-			g := groups[i]
+	for i := range demoDeviceGroups {
+		if demoDeviceGroups[i].ID == groupID {
+			g := demoDeviceGroups[i]
 			g.DeviceCount = len(g.DeviceIDs)
 			found = &g
 			break
 		}
 	}
-	deviceGroupMu.Unlock()
+	deviceGroupMu.RUnlock()
 
 	if found != nil {
 		c.JSON(http.StatusOK, gin.H{
@@ -263,11 +181,12 @@ func CreateDeviceGroup(c *gin.Context) {
 
 	now := time.Now()
 
+	ensureDemoDeviceGroupsInitialized()
+
 	deviceGroupMu.Lock()
-	groups := initDemoDeviceGroupsLocked()
 
 	// Check for duplicate name
-	for _, g := range groups {
+	for _, g := range demoDeviceGroups {
 		if strings.EqualFold(g.Name, strings.TrimSpace(req.Name)) {
 			deviceGroupMu.Unlock()
 			apiErr := errors.NewValidation("A device group with this name already exists")
@@ -287,7 +206,7 @@ func CreateDeviceGroup(c *gin.Context) {
 		UpdatedAt:   now,
 	}
 	nextDemoGroupID++
-	demoDeviceGroups = append(groups, newGroup)
+	demoDeviceGroups = append(demoDeviceGroups, newGroup)
 	deviceGroupMu.Unlock()
 
 	logger.Info("Demo mode: created device group id=%s name=%q", newGroup.ID, newGroup.Name)
@@ -321,11 +240,12 @@ func UpdateDeviceGroup(c *gin.Context) {
 		return
 	}
 
+	ensureDemoDeviceGroupsInitialized()
+
 	deviceGroupMu.Lock()
-	groups := initDemoDeviceGroupsLocked()
 
 	// Check for duplicate name (excluding current group)
-	for _, g := range groups {
+	for _, g := range demoDeviceGroups {
 		if g.ID != groupID && strings.EqualFold(g.Name, strings.TrimSpace(req.Name)) {
 			deviceGroupMu.Unlock()
 			apiErr := errors.NewValidation("A device group with this name already exists")
@@ -335,20 +255,20 @@ func UpdateDeviceGroup(c *gin.Context) {
 	}
 
 	var updated *DeviceGroup
-	for i := range groups {
-		if groups[i].ID == groupID {
-			groups[i].Name = strings.TrimSpace(req.Name)
-			groups[i].Description = strings.TrimSpace(req.Description)
+	for i := range demoDeviceGroups {
+		if demoDeviceGroups[i].ID == groupID {
+			demoDeviceGroups[i].Name = strings.TrimSpace(req.Name)
+			demoDeviceGroups[i].Description = strings.TrimSpace(req.Description)
 			if strings.TrimSpace(req.Color) != "" {
-				groups[i].Color = strings.TrimSpace(req.Color)
+				demoDeviceGroups[i].Color = strings.TrimSpace(req.Color)
 			}
 			if req.DeviceIDs != nil {
-				groups[i].DeviceIDs = req.DeviceIDs
-				groups[i].DeviceCount = len(req.DeviceIDs)
+				demoDeviceGroups[i].DeviceIDs = req.DeviceIDs
+				demoDeviceGroups[i].DeviceCount = len(req.DeviceIDs)
 			}
-			groups[i].UpdatedAt = time.Now()
+			demoDeviceGroups[i].UpdatedAt = time.Now()
 
-			g := groups[i]
+			g := demoDeviceGroups[i]
 			updated = &g
 			break
 		}
@@ -378,12 +298,13 @@ func DeleteDeviceGroup(c *gin.Context) {
 		return
 	}
 
+	ensureDemoDeviceGroupsInitialized()
+
 	deviceGroupMu.Lock()
-	groups := initDemoDeviceGroupsLocked()
 	found := false
-	for i := range groups {
-		if groups[i].ID == groupID {
-			demoDeviceGroups = append(groups[:i], groups[i+1:]...)
+	for i := range demoDeviceGroups {
+		if demoDeviceGroups[i].ID == groupID {
+			demoDeviceGroups = append(demoDeviceGroups[:i], demoDeviceGroups[i+1:]...)
 			found = true
 			break
 		}
@@ -402,125 +323,3 @@ func DeleteDeviceGroup(c *gin.Context) {
 	c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
 }
 
-// AddDevicesToGroup adds one or more devices to a group.
-// POST /api/v1/device-groups/:id/devices
-func AddDevicesToGroup(c *gin.Context) {
-	groupID := c.Param("id")
-	if groupID == "" {
-		apiErr := errors.NewBadRequest("Device group ID is required")
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	var req AddDevicesToGroupRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		apiErr := errors.NewBadRequest("Invalid request body: " + err.Error())
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	if len(req.DeviceIDs) == 0 {
-		apiErr := errors.NewValidation("At least one device ID is required")
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	deviceGroupMu.Lock()
-	groups := initDemoDeviceGroupsLocked()
-	var updated *DeviceGroup
-	for i := range groups {
-		if groups[i].ID == groupID {
-			// Build a set of existing device IDs for deduplication
-			existing := make(map[string]bool, len(groups[i].DeviceIDs))
-			for _, id := range groups[i].DeviceIDs {
-				existing[id] = true
-			}
-
-			// Add only new device IDs
-			for _, id := range req.DeviceIDs {
-				if !existing[id] {
-					groups[i].DeviceIDs = append(groups[i].DeviceIDs, id)
-					existing[id] = true
-				}
-			}
-			groups[i].DeviceCount = len(groups[i].DeviceIDs)
-			groups[i].UpdatedAt = time.Now()
-
-			g := groups[i]
-			updated = &g
-			break
-		}
-	}
-	deviceGroupMu.Unlock()
-
-	if updated != nil {
-		logger.Info("Demo mode: added devices to group id=%s, new count=%d", groupID, updated.DeviceCount)
-		c.JSON(http.StatusOK, gin.H{
-			"device_group": updated,
-			"message":      "Devices added to group successfully",
-		})
-		return
-	}
-
-	apiErr := errors.NewNotFound("device group")
-	c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-}
-
-// RemoveDeviceFromGroup removes a single device from a group.
-// DELETE /api/v1/device-groups/:id/devices/:deviceId
-func RemoveDeviceFromGroup(c *gin.Context) {
-	groupID := c.Param("id")
-	deviceID := c.Param("deviceId")
-
-	if groupID == "" || deviceID == "" {
-		apiErr := errors.NewBadRequest("Device group ID and device ID are required")
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	deviceGroupMu.Lock()
-	groups := initDemoDeviceGroupsLocked()
-	var updated *DeviceGroup
-	for i := range groups {
-		if groups[i].ID == groupID {
-			// Find and remove the device
-			deviceFound := false
-			newDeviceIDs := make([]string, 0, len(groups[i].DeviceIDs))
-			for _, id := range groups[i].DeviceIDs {
-				if id == deviceID {
-					deviceFound = true
-					continue
-				}
-				newDeviceIDs = append(newDeviceIDs, id)
-			}
-
-			if !deviceFound {
-				deviceGroupMu.Unlock()
-				apiErr := errors.NewNotFound("device in group")
-				c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-				return
-			}
-
-			groups[i].DeviceIDs = newDeviceIDs
-			groups[i].DeviceCount = len(newDeviceIDs)
-			groups[i].UpdatedAt = time.Now()
-
-			g := groups[i]
-			updated = &g
-			break
-		}
-	}
-	deviceGroupMu.Unlock()
-
-	if updated != nil {
-		logger.Info("Demo mode: removed device %s from group %s, new count=%d", deviceID, groupID, updated.DeviceCount)
-		c.JSON(http.StatusOK, gin.H{
-			"device_group": updated,
-			"message":      "Device removed from group successfully",
-		})
-		return
-	}
-
-	apiErr := errors.NewNotFound("device group")
-	c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-}

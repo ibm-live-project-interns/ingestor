@@ -206,6 +206,25 @@ func (r *UserRepository) SoftDelete(id uint) error {
 	return nil
 }
 
+// GetByUsernameOrEmail retrieves an active user with email alerts enabled,
+// matching by username, email, or full name (first_name || ' ' || last_name).
+// This is a targeted single-row query used by ticket email notifications to
+// avoid loading all users into memory.
+func (r *UserRepository) GetByUsernameOrEmail(identifier string) (*models.User, error) {
+	var user models.User
+	err := r.db.Where(
+		"(username = ? OR email = ? OR CONCAT(first_name, ' ', last_name) = ?) AND is_active = true AND email_alerts = true",
+		identifier, identifier, identifier,
+	).First(&user).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to get user by identifier %q: %w", identifier, err)
+	}
+	return &user, nil
+}
+
 // UpdateFields updates specific fields of a user
 func (r *UserRepository) UpdateFields(id uint, updates map[string]interface{}) error {
 	result := r.db.Model(&models.User{}).Where("id = ?", id).Updates(updates)
