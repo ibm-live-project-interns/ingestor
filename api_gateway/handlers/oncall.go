@@ -286,16 +286,84 @@ func GetCurrentOnCall(c *gin.Context) {
 	})
 }
 
-// GetOnCallSchedule returns the weekly on-call schedule with overrides
+// GetOnCallSchedule returns the weekly on-call schedule with overrides.
+// Queries DB first; falls back to demo data if DB unavailable or empty.
 // GET /api/v1/on-call/schedule
 func GetOnCallSchedule(c *gin.Context) {
-	// No admin restriction -- all authenticated users can view the schedule
+	db := database.Get()
+	if db != nil && db.DB != nil {
+		now := time.Now().UTC()
 
+		// Week boundaries (Monday – Sunday)
+		weekday := int(now.Weekday())
+		monday := now.AddDate(0, 0, -((weekday+6)%7))
+		monday = time.Date(monday.Year(), monday.Month(), monday.Day(), 0, 0, 0, 0, monday.Location())
+		sunday := monday.AddDate(0, 0, 7)
+
+		var schedules []models.OnCallSchedule
+		err := db.Where("start_time < ? AND end_time > ?", sunday, monday).
+			Order("start_time ASC, is_primary DESC").
+			Find(&schedules).Error
+
+		if err == nil && len(schedules) > 0 {
+			dayNames := []string{"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
+			schedule := make([]ScheduleEntry, 7)
+			for i := 0; i < 7; i++ {
+				day := monday.AddDate(0, 0, i)
+				isToday := day.Year() == now.Year() && day.YearDay() == now.YearDay()
+				shiftHours := "06:00 - 18:00 / 18:00 - 06:00"
+				if i >= 5 {
+					shiftHours = "08:00 - 20:00 / 20:00 - 08:00"
+				}
+				entry := ScheduleEntry{
+					Day:        dayNames[i],
+					Date:       day.Format("2006-01-02"),
+					ShiftHours: shiftHours,
+					IsToday:    isToday,
+				}
+				for _, s := range schedules {
+					if s.StartTime.Before(day.AddDate(0, 0, 1)) && s.EndTime.After(day) {
+						if s.IsPrimary && entry.PrimaryOnCall == "" {
+							entry.PrimaryOnCall = s.Username
+							entry.PrimaryTeam = s.RotationType
+						} else if !s.IsPrimary && entry.SecondaryOnCall == "" {
+							entry.SecondaryOnCall = s.Username
+							entry.SecondaryTeam = s.RotationType
+						}
+					}
+				}
+				schedule[i] = entry
+			}
+
+			var dbOverrides []models.OnCallOverride
+			db.Where("start_time > ?", now).Order("start_time ASC").Limit(10).Find(&dbOverrides)
+			overrides := make([]ScheduleOverride, 0, len(dbOverrides))
+			for _, o := range dbOverrides {
+				overrides = append(overrides, ScheduleOverride{
+					ID:     o.ID,
+					Date:   o.StartTime.Format("2006-01-02"),
+					Reason: o.Reason,
+					Status: "approved",
+				})
+			}
+
+			logger.Info("On-Call: returning weekly schedule from database (%d schedules)", len(schedules))
+			c.JSON(http.StatusOK, gin.H{
+				"schedule":  schedule,
+				"overrides": overrides,
+				"week_of":   schedule[0].Date,
+			})
+			return
+		}
+		if err != nil {
+			logger.Warn("On-Call: schedule query failed: %v, falling back to demo", err)
+		}
+	}
+
+	// Demo data fallback
 	logger.Info("On-Call: returning schedule data (demo mode)")
-
 	schedule := getDemoSchedule()
 	overrides := getDemoOverrides()
-
 	c.JSON(http.StatusOK, gin.H{
 		"schedule":  schedule,
 		"overrides": overrides,

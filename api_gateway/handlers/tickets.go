@@ -137,6 +137,14 @@ func GetTickets(c *gin.Context) {
 		Assignee: c.Query("assignee"),
 	}
 
+	// Validate query parameter lengths (max 255 chars)
+	for _, v := range []string{filter.Priority, filter.Status, filter.Category, filter.Assignee} {
+		if len(v) > 255 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "query parameter too long"})
+			return
+		}
+	}
+
 	// Parse pagination
 	if limitStr := c.Query("limit"); limitStr != "" {
 		if limit, err := strconv.Atoi(limitStr); err == nil {
@@ -147,6 +155,14 @@ func GetTickets(c *gin.Context) {
 		if offset, err := strconv.Atoi(offsetStr); err == nil {
 			filter.Offset = offset
 		}
+	}
+
+	// Apply pagination defaults/caps
+	if filter.Limit <= 0 {
+		filter.Limit = 25
+	}
+	if filter.Limit > 200 {
+		filter.Limit = 200
 	}
 
 	tickets, total, err := repo.List(filter)
@@ -208,6 +224,13 @@ func GetTicketByID(c *gin.Context) {
 
 // CreateTicket creates a new ticket
 func CreateTicket(c *gin.Context) {
+	if !requireJSONContentType(c) {
+		return
+	}
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	var req models.CreateTicketRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		apiErr := errors.NewValidation(err.Error())
@@ -304,6 +327,13 @@ func CreateTicket(c *gin.Context) {
 
 // UpdateTicket updates an existing ticket
 func UpdateTicket(c *gin.Context) {
+	if !requireJSONContentType(c) {
+		return
+	}
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	id := c.Param("id")
 
 	var req models.UpdateTicketRequest
@@ -484,6 +514,10 @@ func ExportTickets(c *gin.Context) {
 
 // DeleteTicket soft deletes a ticket
 func DeleteTicket(c *gin.Context) {
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	id := c.Param("id")
 
 	repo := ticketRepo()

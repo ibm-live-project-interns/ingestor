@@ -1,8 +1,10 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"time"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 
@@ -12,6 +14,34 @@ import (
 	"github.com/ibm-live-project-interns/ingestor/shared/logger"
 	"github.com/ibm-live-project-interns/ingestor/shared/models"
 )
+
+// validatePasswordStrength enforces password complexity rules.
+func validatePasswordStrength(password string) error {
+	if len(password) < 8 {
+		return fmt.Errorf("password must be at least 8 characters")
+	}
+	var hasUpper, hasDigit, hasSpecial bool
+	for _, ch := range password {
+		switch {
+		case unicode.IsUpper(ch):
+			hasUpper = true
+		case unicode.IsDigit(ch):
+			hasDigit = true
+		case !unicode.IsLetter(ch) && !unicode.IsDigit(ch):
+			hasSpecial = true
+		}
+	}
+	if !hasUpper {
+		return fmt.Errorf("password must contain at least one uppercase letter")
+	}
+	if !hasDigit {
+		return fmt.Errorf("password must contain at least one number")
+	}
+	if !hasSpecial {
+		return fmt.Errorf("password must contain at least one special character")
+	}
+	return nil
+}
 
 // RegisterRequest represents the registration request body
 type RegisterRequest struct {
@@ -35,16 +65,25 @@ func Register(c *gin.Context) {
 		return
 	}
 
+	// Validate password strength
+	if err := validatePasswordStrength(req.Password); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
 	db := database.Get()
 	if db == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "Database not available"})
 		return
 	}
 
-	// Check if email already exists
+	// Check if email already exists. To avoid user-enumeration, we always
+	// return a generic success response regardless of whether an account
+	// exists. The actual outcome is logged server-side for diagnostics.
 	var existingUser models.User
 	if err := db.Where("email = ?", req.Email).First(&existingUser).Error; err == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "Email already registered"})
+		logger.Info("Registration attempted for already-registered email: %s", req.Email)
+		c.JSON(http.StatusOK, gin.H{"message": "If this email is available, a verification link will be sent to it."})
 		return
 	}
 
@@ -91,7 +130,7 @@ func Register(c *gin.Context) {
 	// Send verification email
 	if services.Email != nil {
 		if err := services.Email.SendVerificationEmail(user.Email, user.Username, verificationToken); err != nil {
-			logger.Warn("Failed to send verification email: %v", err)
+			logger.Error("Failed to send verification email: %v", err)
 			// Don't fail registration, just log the error
 		}
 	}
@@ -148,7 +187,7 @@ func VerifyEmail(c *gin.Context) {
 	// Send welcome email
 	if services.Email != nil {
 		if err := services.Email.SendWelcomeEmail(user.Email, user.Username); err != nil {
-			logger.Warn("Failed to send welcome email: %v", err)
+			logger.Error("Failed to send welcome email: %v", err)
 		}
 	}
 
@@ -206,7 +245,7 @@ func ResendVerification(c *gin.Context) {
 	// Send verification email
 	if services.Email != nil {
 		if err := services.Email.SendVerificationEmail(user.Email, user.Username, verificationToken); err != nil {
-			logger.Warn("Failed to send verification email: %v", err)
+			logger.Error("Failed to send verification email: %v", err)
 		}
 	}
 

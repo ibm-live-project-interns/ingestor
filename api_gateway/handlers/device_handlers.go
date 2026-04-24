@@ -41,6 +41,14 @@ func GetDevices(c *gin.Context) {
 		query = query.Where("status = ?", status)
 	}
 	if deviceType := c.Query("type"); deviceType != "" {
+		allowedTypes := map[string]bool{
+			"router": true, "switch": true, "firewall": true, "server": true,
+			"access_point": true, "load_balancer": true, "gateway": true, "other": true,
+		}
+		if !allowedTypes[strings.ToLower(deviceType)] {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid device type"})
+			return
+		}
 		// The DB uses "icon" for device category; match on that
 		query = query.Where("LOWER(icon) = LOWER(?)", deviceType)
 	}

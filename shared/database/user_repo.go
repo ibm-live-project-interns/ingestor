@@ -225,6 +225,33 @@ func (r *UserRepository) GetByUsernameOrEmail(identifier string) (*models.User, 
 	return &user, nil
 }
 
+// IncrementFailedLogin atomically increments the failed_attempts counter
+// and returns the post-increment value. Uses a single UPDATE ... RETURNING
+// statement so concurrent login attempts cannot race on the counter.
+func (r *UserRepository) IncrementFailedLogin(userID uint) (int, error) {
+	var count int
+	err := r.db.Raw(
+		"UPDATE users SET failed_attempts = failed_attempts + 1 WHERE id = ? RETURNING failed_attempts",
+		userID,
+	).Scan(&count).Error
+	return count, err
+}
+
+// LockUser sets a future unlock timestamp on a user account, preventing
+// further login attempts until the timestamp elapses.
+func (r *UserRepository) LockUser(userID uint, until time.Time) error {
+	return r.db.Exec("UPDATE users SET locked_until = ? WHERE id = ?", until, userID).Error
+}
+
+// ResetFailedLogin clears both the failed-attempt counter and any active
+// account lock. Called after a successful login.
+func (r *UserRepository) ResetFailedLogin(userID uint) error {
+	return r.db.Exec(
+		"UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = ?",
+		userID,
+	).Error
+}
+
 // UpdateFields updates specific fields of a user
 func (r *UserRepository) UpdateFields(id uint, updates map[string]interface{}) error {
 	result := r.db.Model(&models.User{}).Where("id = ?", id).Updates(updates)

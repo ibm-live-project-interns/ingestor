@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -8,6 +9,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"api_gateway/services"
 
 	"github.com/ibm-live-project-interns/ingestor/shared/database"
 	"github.com/ibm-live-project-interns/ingestor/shared/errors"
@@ -94,6 +97,10 @@ type CreateOnCallScheduleRequest struct {
 // CreateOnCallSchedule creates a new on-call schedule
 // POST /api/v1/on-call/schedules
 func CreateOnCallSchedule(c *gin.Context) {
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	db := database.Get()
 	if db == nil || db.DB == nil {
 		if isDemoMode() {
@@ -179,6 +186,31 @@ func CreateOnCallSchedule(c *gin.Context) {
 
 	logger.Info("On-call schedule %d created by %s for %s", schedule.ID, createdBy, schedule.Username)
 
+	// Send on-call rotation reminder email to assignee (non-blocking)
+	if services.Email != nil && req.UserID > 0 {
+		sched := schedule
+		assigneeID := req.UserID
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = ctx
+			var assignee models.User
+			if err := db.First(&assignee, assigneeID).Error; err != nil {
+				logger.Error("Failed to look up on-call assignee %d: %v", assigneeID, err)
+				return
+			}
+			custom := map[string]interface{}{
+				"UserName":  sched.Username,
+				"StartTime": sched.StartTime.Format(time.RFC3339),
+				"EndTime":   sched.EndTime.Format(time.RFC3339),
+				"Rotation":  sched.RotationType,
+			}
+			if err := services.Email.SendNotification(assignee.Email, assignee.Username, "On-Call Schedule Updated", "oncall-rotation-reminder", custom); err != nil {
+				logger.Error("Failed to send oncall-rotation-reminder email: %v", err)
+			}
+		}()
+	}
+
 	c.JSON(http.StatusCreated, gin.H{
 		"message":  "On-call schedule created successfully",
 		"schedule": schedule,
@@ -188,6 +220,10 @@ func CreateOnCallSchedule(c *gin.Context) {
 // UpdateOnCallSchedule updates an existing on-call schedule
 // PUT /api/v1/on-call/schedules/:id
 func UpdateOnCallSchedule(c *gin.Context) {
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	db := database.Get()
 	if db == nil || db.DB == nil {
 		if isDemoMode() {
@@ -283,6 +319,10 @@ func UpdateOnCallSchedule(c *gin.Context) {
 // DeleteOnCallSchedule deletes an on-call schedule
 // DELETE /api/v1/on-call/schedules/:id
 func DeleteOnCallSchedule(c *gin.Context) {
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	db := database.Get()
 	if db == nil || db.DB == nil {
 		if isDemoMode() {
@@ -342,6 +382,10 @@ type CreateOnCallOverrideRequest struct {
 // CreateOnCallOverride creates a new on-call override
 // POST /api/v1/on-call/overrides
 func CreateOnCallOverride(c *gin.Context) {
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	db := database.Get()
 	if db == nil || db.DB == nil {
 		if isDemoMode() {
@@ -424,6 +468,10 @@ func CreateOnCallOverride(c *gin.Context) {
 // DeleteOnCallOverride deletes an on-call override
 // DELETE /api/v1/on-call/overrides/:id
 func DeleteOnCallOverride(c *gin.Context) {
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	db := database.Get()
 	if db == nil || db.DB == nil {
 		if isDemoMode() {

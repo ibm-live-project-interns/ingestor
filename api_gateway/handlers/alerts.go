@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -15,6 +16,20 @@ import (
 	"github.com/ibm-live-project-interns/ingestor/shared/logger"
 	"github.com/ibm-live-project-interns/ingestor/shared/models"
 )
+
+// requireJSONContentType ensures write requests carry application/json.
+// Returns true if the Content-Type is acceptable (or irrelevant), and false
+// if a 415 was written and the handler must return.
+func requireJSONContentType(c *gin.Context) bool {
+	if c.Request.Method == http.MethodPost || c.Request.Method == http.MethodPut {
+		ct := c.ContentType()
+		if !strings.HasPrefix(ct, "application/json") {
+			c.JSON(http.StatusUnsupportedMediaType, gin.H{"error": "Content-Type must be application/json"})
+			return false
+		}
+	}
+	return true
+}
 
 // alertRepo returns the alert repository using the global database
 // Returns nil if database is not available (demo mode)
@@ -56,6 +71,14 @@ func GetAlerts(c *gin.Context) {
 		Device:   c.Query("device"),
 	}
 
+	// Validate query parameter lengths (max 255 chars)
+	for _, v := range []string{filter.Severity, filter.Status, filter.Category, filter.Device} {
+		if len(v) > 255 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "query parameter too long"})
+			return
+		}
+	}
+
 	// Parse time range filters
 	if fromStr := c.Query("from"); fromStr != "" {
 		if t, err := time.Parse(time.RFC3339, fromStr); err == nil {
@@ -65,6 +88,18 @@ func GetAlerts(c *gin.Context) {
 	if toStr := c.Query("to"); toStr != "" {
 		if t, err := time.Parse(time.RFC3339, toStr); err == nil {
 			filter.To = &t
+		}
+	}
+
+	// Validate time range
+	if filter.From != nil && filter.To != nil {
+		if filter.From.After(*filter.To) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "from must be before to"})
+			return
+		}
+		if filter.To.Sub(*filter.From) > 90*24*time.Hour {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "time range cannot exceed 90 days"})
+			return
 		}
 	}
 
@@ -78,6 +113,14 @@ func GetAlerts(c *gin.Context) {
 		if offset, err := strconv.Atoi(offsetStr); err == nil {
 			filter.Offset = offset
 		}
+	}
+
+	// Apply pagination defaults/caps
+	if filter.Limit <= 0 {
+		filter.Limit = 50
+	}
+	if filter.Limit > 500 {
+		filter.Limit = 500
 	}
 
 	alerts, total, err := repo.List(filter)

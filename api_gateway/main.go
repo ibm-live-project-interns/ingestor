@@ -2,18 +2,18 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/subtle"
-	"encoding/hex"
 	"net/http"
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/time/rate"
 
 	"api_gateway/handlers"
 	"api_gateway/services"
@@ -26,6 +26,42 @@ import (
 	"github.com/ibm-live-project-interns/ingestor/shared/rbac"
 )
 
+// splitAndTrimOrigins splits a comma-separated CORS origin list and trims
+// whitespace from each entry. Empty entries (e.g. from trailing commas) are
+// dropped so gin-contrib/cors never receives a blank origin.
+func splitAndTrimOrigins(s string) []string {
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if t := strings.TrimSpace(p); t != "" {
+			result = append(result, t)
+		}
+	}
+	return result
+}
+
+// authIPLimiters holds a per-source-IP token bucket for authentication
+// endpoints (login, register, password flows). A per-IP budget blunts
+// credential-stuffing and brute-force attempts without needing a shared
+// Redis store for the typical single-instance deployment.
+var authIPLimiters sync.Map
+
+// authRateLimiter returns a middleware that allows at most 5 auth requests
+// per minute per client IP. Every request consumes one token; buckets
+// refill at 1 token per 12 seconds (5/minute) with a burst of 5.
+func authRateLimiter() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ip := c.ClientIP()
+		val, _ := authIPLimiters.LoadOrStore(ip, rate.NewLimiter(rate.Every(60*time.Second/5), 5))
+		limiter := val.(*rate.Limiter)
+		if !limiter.Allow() {
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{"error": "Too many requests. Please wait before trying again."})
+			return
+		}
+		c.Next()
+	}
+}
+
 func main() {
 	// Initialize structured logger
 	logCfg := logger.DefaultLoggerConfig()
@@ -34,12 +70,11 @@ func main() {
 
 	logger.Info("API Gateway starting...")
 
-	// Ensure JWT_SECRET exists (generate random for dev if missing)
+	// JWT_SECRET is mandatory. Silently generating a random secret on startup
+	// would invalidate every existing session on each restart and masks the
+	// real misconfiguration — fail fast instead.
 	if os.Getenv("JWT_SECRET") == "" {
-		logger.Warn("JWT_SECRET not set, generating random secret. Set JWT_SECRET in production!")
-		bytes := make([]byte, 32)
-		rand.Read(bytes)
-		os.Setenv("JWT_SECRET", hex.EncodeToString(bytes))
+		logger.Fatal("JWT_SECRET environment variable is required")
 	}
 
 	// Initialize database (non-fatal: operates in demo mode without DB)
@@ -50,13 +85,28 @@ func main() {
 		if db, err := database.Init(dbCfg); err != nil {
 			logger.Warn("Failed to connect to database: %v. Running in demo mode", err)
 		} else {
-			logger.Info("Database connected: %s@%s:%s/%s", dbCfg.User, dbCfg.Host, dbCfg.Port, dbCfg.DBName)
+			// Don't log DB host/user/port/dbname to avoid leaking topology to logs.
+			logger.Info("Database connected successfully")
+
+			// Migrate legacy text columns to JSONB in-place. Errors are logged
+			// but non-fatal so repeated startups on already-migrated schemas do
+			// not abort boot.
+			if err := db.Exec(`ALTER TABLE device_groups ALTER COLUMN device_ids TYPE JSONB USING CASE WHEN device_ids IS NULL OR device_ids = '' THEN '[]'::jsonb ELSE device_ids::jsonb END`).Error; err != nil {
+				logger.Debug("device_groups jsonb migration skipped: %v", err)
+			}
+			if err := db.Exec(`ALTER TABLE runbooks ALTER COLUMN steps TYPE JSONB USING CASE WHEN steps IS NULL OR steps = '' THEN '[]'::jsonb ELSE steps::jsonb END`).Error; err != nil {
+				logger.Debug("runbooks jsonb migration skipped: %v", err)
+			}
+
 			// Auto-migrate tables that may not exist in the init.sql schema
 			if err := db.AutoMigrate(
 				&models.AuditLog{},
 				&models.OnCallSchedule{},
 				&models.OnCallOverride{},
 				&models.PostMortem{},
+				&models.DeviceGroup{},
+				&models.Runbook{},
+				&models.Device{},
 			); err != nil {
 				logger.Warn("Auto-migration failed: %v", err)
 			}
@@ -106,12 +156,12 @@ func main() {
 	// 8.3 fix: Reduced MaxAge from 12 hours to 6 hours
 	corsOrigins := config.GetEnv("CORS_ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:5174,http://localhost:3000")
 	router.Use(cors.New(cors.Config{
-		AllowOrigins:     strings.Split(corsOrigins, ","),
+		AllowOrigins:     splitAndTrimOrigins(corsOrigins),
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-Internal-API-Key"},
 		ExposeHeaders:    []string{"Content-Length", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset"},
 		AllowCredentials: true,
-		MaxAge:           6 * time.Hour,
+		MaxAge:           1 * time.Hour,
 	}))
 
 	// Internal API routes (service-to-service, API key protected)
@@ -125,22 +175,25 @@ func main() {
 	// API v1 routes
 	v1 := router.Group("/api/v1")
 	{
-		// Public routes (no auth required)
-		v1.POST("/login", handlers.Login)
-		v1.POST("/register", handlers.Register)
+		// Public routes (no auth required) — gated by per-IP rate limiter to
+		// make credential-stuffing and token-guessing costly.
+		authLimited := authRateLimiter()
+		v1.POST("/login", authLimited, handlers.Login)
+		v1.POST("/register", authLimited, handlers.Register)
 		v1.GET("/health", handlers.GetHealth)
 
 		// Google OAuth routes (public)
 		v1.GET("/auth/google/login", handlers.GoogleLogin)
 		v1.GET("/auth/google/callback", handlers.GoogleCallback)
+		v1.GET("/auth/oauth/exchange", handlers.ExchangeOAuthCode)
 
 		// Email test endpoint (requires sysadmin role)
 		// Moved to protected routes for security — see testAdmin group below
 
 		// Public auth routes (no auth required - used by unauthenticated users)
 		v1.POST("/auth/verify-email", handlers.VerifyEmail)
-		v1.POST("/auth/forgot-password", handlers.ForgotPassword)
-		v1.POST("/auth/reset-password", handlers.ResetPassword)
+		v1.POST("/auth/forgot-password", authLimited, handlers.ForgotPassword)
+		v1.POST("/auth/reset-password", authLimited, handlers.ResetPassword)
 		v1.POST("/auth/resend-verification", handlers.ResendVerification)
 
 		// Protected routes (auth required)
@@ -210,6 +263,8 @@ func main() {
 			// User Settings (self-service, no extra RBAC)
 			protected.GET("/settings/notifications", handlers.GetNotificationPreferences)
 			protected.PUT("/settings/notifications", handlers.UpdateNotificationPreferences)
+			protected.GET("/settings/ui", handlers.GetUIPreferences)
+			protected.PUT("/settings/ui", handlers.UpdateUIPreferences)
 
 			// User management restricted to sysadmin role
 			userAdmin := protected.Group("")
@@ -333,12 +388,20 @@ func main() {
 				testAdmin.GET("/test/send-all-emails", handlers.SendAllTestEmails)
 			}
 
+			// Alert history (resolved alerts log)
+			protected.GET("/alert-history", handlers.GetAlertHistory)
+
 			// Service Status (application-level health checks)
 			protected.GET("/service-status", handlers.GetServiceStatus)
 
-			// Docker Container Status & Logs
-			protected.GET("/services/status", handlers.GetDockerServiceStatus)
-			protected.GET("/services/:name/logs", handlers.GetDockerServiceLogs)
+			// Docker Container Status & Logs — restricted to privileged roles
+			// because container logs can expose sensitive runtime state.
+			dockerAdmin := protected.Group("")
+			dockerAdmin.Use(middleware.RequireRole(rbac.RoleSysAdmin, rbac.RoleSeniorEng))
+			{
+				dockerAdmin.GET("/services/status", handlers.GetDockerServiceStatus)
+				dockerAdmin.GET("/services/:name/logs", handlers.GetDockerServiceLogs)
+			}
 
 			// Post-Mortems (list and update - all authenticated users)
 			protected.GET("/post-mortems", handlers.ListPostMortems)
@@ -359,7 +422,7 @@ func main() {
 	// 8.3 fix: Use http.Server with timeouts instead of router.Run()
 	// Also implements graceful shutdown with signal handling (SIGTERM/SIGINT)
 	port := config.GetEnv("API_GATEWAY_PORT", config.GetEnv("PORT", "8080"))
-	logger.Info("API Gateway running on :%s (mode=%s, cors=%s)", port, ginMode, corsOrigins)
+	logger.Info("API Gateway running on :%s (mode=%s)", port, ginMode)
 
 	srv := &http.Server{
 		Addr:         ":" + port,

@@ -27,6 +27,11 @@ func DeleteUser(c *gin.Context) {
 		return
 	}
 
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
+
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -107,7 +112,7 @@ func DeleteUser(c *gin.Context) {
 			}
 			subject := "Your account has been deactivated"
 			if err := services.Email.SendNotification(user.Email, user.Username, subject, "account-deactivated", custom); err != nil {
-				logger.Warn("Failed to send account-deactivated email to %s: %v", user.Email, err)
+				logger.Error("Failed to send account-deactivated email to %s: %v", user.Email, err)
 			}
 		}()
 	}
@@ -124,6 +129,11 @@ func ResetUserPassword(c *gin.Context) {
 	if !isAdminRole(c) {
 		apiErr := errors.NewInsufficientRole(string(rbac.RoleSysAdmin))
 		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
+		return
+	}
+
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
 		return
 	}
 
@@ -245,7 +255,7 @@ func ResetUserPassword(c *gin.Context) {
 			}
 			subject := "Your password has been reset by an administrator"
 			if err := services.Email.SendNotification(user.Email, user.Username, subject, "password-reset-by-admin", custom); err != nil {
-				logger.Warn("Failed to send password-reset-by-admin email to %s: %v", user.Email, err)
+				logger.Error("Failed to send password-reset-by-admin email to %s: %v", user.Email, err)
 			}
 		}()
 	}

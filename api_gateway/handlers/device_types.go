@@ -24,6 +24,12 @@ type Device struct {
 	Model       string    `json:"model" gorm:"column:model"`
 	LastSeen    time.Time `json:"last_seen" gorm:"-"`
 	AlertCount  int       `json:"alert_count" gorm:"column:alert_count"`
+	// RecentAlerts mirrors AlertCount in the JSON payload so demo-mode responses
+	// match the enrichedDevice shape the frontend expects (field: recent_alerts).
+	RecentAlerts int      `json:"recent_alerts" gorm:"-"`
+	// HealthScore is sent so the TopInterfaces tiebreaker (lowest health first)
+	// has a sensible value in demo mode.
+	HealthScore int       `json:"health_score" gorm:"-"`
 	Uptime      string    `json:"uptime" gorm:"-"`
 	Description string    `json:"description,omitempty" gorm:"-"`
 }
@@ -87,10 +93,12 @@ func getDemoNoisyDevices() []models.NoisyDevice {
 	}
 }
 
-// getDemoDevices returns demo devices for when database is unavailable
+// getDemoDevices returns demo devices for when database is unavailable.
+// RecentAlerts and HealthScore are derived after the literal list so the
+// demo response matches the enrichedDevice JSON shape the frontend expects.
 func getDemoDevices() []Device {
 	now := time.Now()
-	return []Device{
+	devices := []Device{
 		{
 			ID:         "router-core-01",
 			Name:       "Core Router 01",
@@ -196,6 +204,24 @@ func getDemoDevices() []Device {
 			Uptime:     "0d 0h 0m",
 		},
 	}
+	// Mirror AlertCount into RecentAlerts and infer a simple health score so
+	// the JSON response shape matches what the frontend expects in demo mode.
+	for i := range devices {
+		devices[i].RecentAlerts = devices[i].AlertCount
+		// Rough health score: fewer alerts + "online" status = higher score.
+		score := 100 - devices[i].AlertCount*5
+		switch devices[i].Status {
+		case "degraded":
+			score -= 20
+		case "offline":
+			score = 0
+		}
+		if score < 0 {
+			score = 0
+		}
+		devices[i].HealthScore = score
+	}
+	return devices
 }
 
 // inferDeviceType determines a device type from its icon, model, and vendor fields.

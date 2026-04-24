@@ -69,6 +69,13 @@ func GetChannelByID(c *gin.Context) {
 }
 
 func CreateChannel(c *gin.Context) {
+	if !requireJSONContentType(c) {
+		return
+	}
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	var req models.CreateChannelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		apiErr := errors.NewValidation(err.Error())
@@ -117,6 +124,13 @@ func CreateChannel(c *gin.Context) {
 }
 
 func UpdateChannel(c *gin.Context) {
+	if !requireJSONContentType(c) {
+		return
+	}
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	id := c.Param("id")
 	var req models.UpdateChannelRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -156,6 +170,10 @@ func UpdateChannel(c *gin.Context) {
 }
 
 func DeleteChannel(c *gin.Context) {
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	id := c.Param("id")
 	repo := configRepo()
 	if repo == nil {

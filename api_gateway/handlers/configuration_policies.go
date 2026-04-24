@@ -1,10 +1,14 @@
 package handlers
 
 import (
+	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"api_gateway/services"
 
 	"github.com/ibm-live-project-interns/ingestor/shared/errors"
 	"github.com/ibm-live-project-interns/ingestor/shared/logger"
@@ -69,6 +73,10 @@ func GetPolicyByID(c *gin.Context) {
 }
 
 func CreatePolicy(c *gin.Context) {
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	var req models.CreatePolicyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		apiErr := errors.NewValidation(err.Error())
@@ -117,6 +125,10 @@ func CreatePolicy(c *gin.Context) {
 }
 
 func UpdatePolicy(c *gin.Context) {
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	id := c.Param("id")
 	var req models.UpdatePolicyRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -156,6 +168,10 @@ func UpdatePolicy(c *gin.Context) {
 }
 
 func DeletePolicy(c *gin.Context) {
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	id := c.Param("id")
 	repo := configRepo()
 	if repo == nil {
@@ -228,6 +244,10 @@ func GetWindowByID(c *gin.Context) {
 }
 
 func CreateWindow(c *gin.Context) {
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	var req models.CreateWindowRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		apiErr := errors.NewValidation(err.Error())
@@ -272,10 +292,35 @@ func CreateWindow(c *gin.Context) {
 		return
 	}
 	logger.Info("Maintenance window %s created", id)
+
+	// Send maintenance-upcoming notification email (non-blocking)
+	if services.Email != nil {
+		window := win
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = ctx
+			custom := map[string]interface{}{
+				"WindowName":  window.Name,
+				"StartTime":   window.Schedule,
+				"Duration":    window.Duration,
+				"Status":      window.Status,
+				"Description": window.Name,
+			}
+			if err := services.Email.SendNotification("team@sentrix.local", "Maintenance Team", "Maintenance Window Created", "maintenance-upcoming", custom); err != nil {
+				logger.Error("Failed to send maintenance-upcoming email: %v", err)
+			}
+		}()
+	}
+
 	c.JSON(http.StatusCreated, gin.H{"message": "Window created", "window": win})
 }
 
 func UpdateWindow(c *gin.Context) {
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	id := c.Param("id")
 	var req models.UpdateWindowRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -315,6 +360,10 @@ func UpdateWindow(c *gin.Context) {
 }
 
 func DeleteWindow(c *gin.Context) {
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	id := c.Param("id")
 	repo := configRepo()
 	if repo == nil {

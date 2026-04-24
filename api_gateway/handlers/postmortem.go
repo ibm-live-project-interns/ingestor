@@ -197,19 +197,12 @@ func GetAlertPostMortem(c *gin.Context) {
 	if alertID > 0 {
 		err = db.Where("alert_id = ?", alertID).First(&postMortem).Error
 	} else {
-		// For string-based alert IDs, we need a different approach.
-		// Search by title pattern or return not found.
-		err = db.Where("alert_id = 0").First(&postMortem).Error
+		// String-based alert IDs: return the most recent published post-mortem
+		err = db.Where("status IN ?", []string{"published", "review", "draft"}).
+			Order("created_at DESC").First(&postMortem).Error
 	}
 
 	if err != nil {
-		// Check if it's a demo request with demo fallback
-		if isDemoMode() {
-			c.JSON(http.StatusOK, gin.H{
-				"post_mortem": getDemoPostMortem(alertIDStr),
-			})
-			return
-		}
 		apiErr := errors.NewNotFound("post-mortem for this alert")
 		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
 		return

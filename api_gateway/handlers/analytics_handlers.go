@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/csv"
 	"fmt"
 	"math"
 	"net/http"
@@ -378,8 +379,174 @@ func ExportReport(c *gin.Context) {
 		ExportAlerts(c)
 	case "tickets":
 		ExportTickets(c)
+	case "devices":
+		ExportDevices(c)
+	case "sla":
+		ExportSLA(c)
+	case "incidents":
+		ExportIncidents(c)
 	default:
-		apiErr := errors.NewBadRequest("Invalid report type. Use 'alerts' or 'tickets'")
+		apiErr := errors.NewBadRequest("Invalid report type. Supported: alerts, tickets, devices, sla, incidents")
 		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
+	}
+}
+
+// ExportDevices exports device inventory as CSV
+func ExportDevices(c *gin.Context) {
+	db := database.Get()
+
+	c.Header("Content-Type", "text/csv")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=devices-report-%s.csv", time.Now().Format("2006-01-02")))
+
+	w := csv.NewWriter(c.Writer)
+	defer w.Flush()
+
+	w.Write([]string{"ID", "Name", "IP", "Status", "Vendor", "Model", "Location", "Alert Count"})
+
+	if db == nil {
+		// Demo mode — write a few representative rows
+		demoRows := [][]string{
+			{"DEV-001", "core-router-01", "10.0.0.1", "active", "Cisco", "ASR 9000", "DC1", "3"},
+			{"DEV-002", "edge-switch-02", "10.0.1.2", "active", "Juniper", "EX4300", "DC1", "1"},
+			{"DEV-003", "firewall-03", "10.0.2.3", "maintenance", "Palo Alto", "PA-3260", "DC2", "0"},
+		}
+		for _, row := range demoRows {
+			w.Write(row)
+		}
+		return
+	}
+
+	var devices []models.Device
+	if err := db.Where("deleted_at IS NULL").Order("name").Find(&devices).Error; err != nil {
+		// Return CSV with headers only on error — do not return 500 mid-stream
+		return
+	}
+	for _, d := range devices {
+		w.Write([]string{
+			d.ID, d.Name, d.IP, d.Status, d.Vendor, d.Model, d.Location,
+			fmt.Sprintf("%d", d.AlertCount),
+		})
+	}
+}
+
+// ExportSLA exports SLA compliance data as CSV
+func ExportSLA(c *gin.Context) {
+	db := database.Get()
+
+	c.Header("Content-Type", "text/csv")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=sla-report-%s.csv", time.Now().Format("2006-01-02")))
+
+	w := csv.NewWriter(c.Writer)
+	defer w.Flush()
+
+	w.Write([]string{"Ticket ID", "Title", "Priority", "Created At", "Resolved At", "Resolution Hours", "SLA Target Hours", "SLA Met"})
+
+	if db == nil {
+		// Demo rows
+		demoRows := [][]string{
+			{"TKT-001", "Network outage DC1", "critical", "2026-04-20T10:00:00Z", "2026-04-20T11:30:00Z", "1.5", "4", "true"},
+			{"TKT-002", "Slow link aggregation", "high", "2026-04-19T08:00:00Z", "2026-04-19T16:00:00Z", "8.0", "8", "true"},
+			{"TKT-003", "VLAN misconfiguration", "medium", "2026-04-18T14:00:00Z", "2026-04-20T10:00:00Z", "44.0", "24", "false"},
+		}
+		for _, row := range demoRows {
+			w.Write(row)
+		}
+		return
+	}
+
+	type slaRow struct {
+		ID              string
+		Title           string
+		Priority        string
+		CreatedAt       time.Time
+		ResolvedAt      *time.Time
+		ResolutionHours float64
+	}
+
+	var rows []models.Ticket
+	if err := db.Where("deleted_at IS NULL").Order("created_at DESC").Limit(500).Find(&rows).Error; err != nil {
+		return
+	}
+
+	slaTargets := map[string]float64{
+		"critical": 4,
+		"high":     8,
+		"medium":   24,
+		"low":      72,
+	}
+
+	for _, t := range rows {
+		resolutionHrs := ""
+		slaMet := ""
+		if t.ResolvedAt != nil {
+			hrs := t.ResolvedAt.Sub(t.CreatedAt).Hours()
+			resolutionHrs = fmt.Sprintf("%.1f", hrs)
+			target := slaTargets[t.Priority]
+			if target > 0 {
+				if hrs <= target {
+					slaMet = "true"
+				} else {
+					slaMet = "false"
+				}
+			}
+		}
+		resolvedAtStr := ""
+		if t.ResolvedAt != nil {
+			resolvedAtStr = t.ResolvedAt.Format(time.RFC3339)
+		}
+		w.Write([]string{
+			t.ID, t.Title, t.Priority,
+			t.CreatedAt.Format(time.RFC3339),
+			resolvedAtStr,
+			resolutionHrs,
+			fmt.Sprintf("%.0f", slaTargets[t.Priority]),
+			slaMet,
+		})
+	}
+}
+
+// ExportIncidents exports resolved incident (ticket) data as CSV
+func ExportIncidents(c *gin.Context) {
+	db := database.Get()
+
+	c.Header("Content-Type", "text/csv")
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=incidents-report-%s.csv", time.Now().Format("2006-01-02")))
+
+	w := csv.NewWriter(c.Writer)
+	defer w.Flush()
+
+	w.Write([]string{"ID", "Title", "Priority", "Category", "Assignee", "Created At", "Resolved At", "MTTR Hours", "Root Cause"})
+
+	if db == nil {
+		demoRows := [][]string{
+			{"TKT-001", "BGP session drop", "critical", "network", "alice@corp.com", "2026-04-20T10:00:00Z", "2026-04-20T11:30:00Z", "1.5", "Router config drift"},
+			{"TKT-002", "High CPU on firewall", "high", "security", "bob@corp.com", "2026-04-19T08:00:00Z", "2026-04-19T16:00:00Z", "8.0", "DDoS mitigation rule"},
+		}
+		for _, row := range demoRows {
+			w.Write(row)
+		}
+		return
+	}
+
+	var tickets []models.Ticket
+	if err := db.Where("status IN ? AND deleted_at IS NULL", []string{"resolved", "closed"}).
+		Order("created_at DESC").Limit(500).Find(&tickets).Error; err != nil {
+		return
+	}
+	for _, t := range tickets {
+		mttrStr := ""
+		resolvedAtStr := ""
+		if t.ResolvedAt != nil {
+			resolvedAtStr = t.ResolvedAt.Format(time.RFC3339)
+			mttrStr = fmt.Sprintf("%.1f", t.ResolvedAt.Sub(t.CreatedAt).Hours())
+		}
+		w.Write([]string{
+			t.ID, t.Title, t.Priority, t.Category,
+			t.Assignee,
+			t.CreatedAt.Format(time.RFC3339),
+			resolvedAtStr,
+			mttrStr,
+			"",
+		})
 	}
 }

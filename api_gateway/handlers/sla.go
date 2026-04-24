@@ -1,12 +1,15 @@
 package handlers
 
 import (
+	"context"
 	"math"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"api_gateway/services"
 
 	"github.com/ibm-live-project-interns/ingestor/shared/constants"
 	"github.com/ibm-live-project-interns/ingestor/shared/database"
@@ -364,6 +367,28 @@ func GetSLAViolations(c *gin.Context) {
 				"ai_summary":      alert.AIAnalysisSummary,
 				"resolved_by":     alert.ResolvedBy,
 			})
+
+			// Send SLA violation email (non-blocking)
+			if services.Email != nil {
+				aID := alert.ID
+				aSev := alert.Severity
+				aDevice := alert.Device
+				exceededBy := formatDuration(excessMinutes)
+				go func() {
+					ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+					defer cancel()
+					_ = ctx
+					custom := map[string]interface{}{
+						"AlertID":  aID,
+						"SLAType":  aSev,
+						"Device":   aDevice,
+						"Exceeded": exceededBy,
+					}
+					if err := services.Email.SendNotification("oncall@sentrix.local", "On-Call", "SLA Violation", "sla-violation", custom); err != nil {
+						logger.Error("Failed to send sla-violation email for alert %s: %v", aID, err)
+					}
+				}()
+			}
 		}
 	}
 

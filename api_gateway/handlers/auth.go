@@ -18,12 +18,17 @@ import (
 )
 
 // getDemoPassword returns the required password for demo mode authentication.
-// Reads from DEMO_PASSWORD env var; falls back to a default for development only.
+// Returns an empty string when DEMO_MODE is not enabled. When DEMO_MODE=true,
+// DEMO_PASSWORD must be set or the process will abort.
 func getDemoPassword() string {
-	if pw := config.GetEnv("DEMO_PASSWORD", ""); pw != "" {
-		return pw
+	if config.GetEnv("DEMO_MODE", "") != "true" {
+		return ""
 	}
-	return "admin123"
+	pw := config.GetEnv("DEMO_PASSWORD", "")
+	if pw == "" {
+		logger.Fatal("DEMO_PASSWORD must be set when DEMO_MODE=true")
+	}
+	return pw
 }
 
 // LoginRequest represents the login request body
@@ -127,35 +132,22 @@ func Login(c *gin.Context) {
 
 	db := database.Get()
 	if db == nil || db.DB == nil {
-		// Demo mode: still require the demo password to prevent open access
-		if req.Password != getDemoPassword() {
-			// Log failed demo login attempt
-			logger.Warn("Demo mode: failed login attempt for %s (wrong password)", req.Email)
+		// Demo mode: require DEMO_MODE=true + DEMO_PASSWORD to prevent open access.
+		demoPw := getDemoPassword()
+		if demoPw == "" || req.Password != demoPw {
+			logger.Warn("Demo mode: failed login attempt (wrong password or demo disabled)")
 			writeAuditLogWithResult(c, "auth.login", "user", req.Email,
-				fmt.Sprintf("Failed demo login for %s: invalid password", req.Email), "failure")
+				"Failed demo login: invalid password or demo mode disabled", "failure")
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 			return
 		}
 
-		logger.Info("Demo mode: logging in as demo user for %s", req.Email)
+		logger.Warn("DEMO AUTH: user authenticated without DB, assigned role=network-ops, email=%s", req.Email)
 		now := time.Now()
 
-		// Map common emails to roles for demo convenience
-		demoRole := "sysadmin"
-		demoName := "Demo Admin"
-		if strings.Contains(req.Email, "ops") || strings.Contains(req.Email, "noc") {
-			demoRole = "network-ops"
-			demoName = "NOC Operator"
-		} else if strings.Contains(req.Email, "sre") {
-			demoRole = "sre"
-			demoName = "SRE Engineer"
-		} else if strings.Contains(req.Email, "network") {
-			demoRole = "network-admin"
-			demoName = "Network Admin"
-		} else if strings.Contains(req.Email, "senior") || strings.Contains(req.Email, "eng") {
-			demoRole = "senior-eng"
-			demoName = "Senior Engineer"
-		}
+		// All demo-mode logins are assigned the least-privileged role.
+		demoRole := "network-ops"
+		demoName := "NOC Operator"
 
 		// Safely split name and check length before indexing to avoid out-of-bounds panic
 		nameParts := strings.Split(demoName, " ")
@@ -245,7 +237,7 @@ func Login(c *gin.Context) {
 							"ActionURL":       services.Email.FrontendURL() + "/forgot-password",
 						}
 						if err := services.Email.SendNotification(user.Email, user.Username, "Your Sentrix Account Has Been Locked", "security-account-locked", custom); err != nil {
-							logger.Warn("Failed to send account-locked email to %s: %v", user.Email, err)
+							logger.Error("Failed to send account-locked email to %s: %v", user.Email, err)
 						}
 					}()
 				}
@@ -262,7 +254,7 @@ func Login(c *gin.Context) {
 							"ActionURL":        services.Email.FrontendURL() + "/settings",
 						}
 						if err := services.Email.SendNotification(user.Email, user.Username, "Suspicious Login Activity on Your Sentrix Account", "security-failed-logins", custom); err != nil {
-							logger.Warn("Failed to send failed-logins email to %s: %v", user.Email, err)
+							logger.Error("Failed to send failed-logins email to %s: %v", user.Email, err)
 						}
 					}()
 				}

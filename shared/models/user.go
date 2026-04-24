@@ -52,6 +52,13 @@ type User struct {
 	PushNotifications bool `gorm:"default:true" json:"push_notifications"`
 	SoundEnabled      bool `gorm:"default:false" json:"sound_enabled"`
 	CriticalOnly      bool `gorm:"default:false" json:"critical_only"`
+
+	// UI Preferences (persisted per-user)
+	Theme           string `gorm:"size:20;default:'system'" json:"theme"`
+	Language        string `gorm:"size:20;default:'en'" json:"language"`
+	Timezone        string `gorm:"size:64;default:'UTC'" json:"timezone"`
+	AutoRefresh     bool   `gorm:"default:true" json:"auto_refresh"`
+	RefreshInterval string `gorm:"size:10;default:'30'" json:"refresh_interval"`
 }
 
 // TableName returns the table name for User

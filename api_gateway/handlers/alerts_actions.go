@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"api_gateway/services"
 
 	"github.com/ibm-live-project-interns/ingestor/shared/config"
+	"github.com/ibm-live-project-interns/ingestor/shared/database"
 	"github.com/ibm-live-project-interns/ingestor/shared/errors"
 	"github.com/ibm-live-project-interns/ingestor/shared/logger"
 	"github.com/ibm-live-project-interns/ingestor/shared/models"
@@ -22,6 +24,11 @@ func AcknowledgeAlert(c *gin.Context) {
 	id := c.Param("id")
 	username, _ := c.Get("username")
 	usernameStr := fmt.Sprintf("%v", username)
+
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 
 	repo := alertRepo()
 	if repo == nil {
@@ -91,7 +98,7 @@ func AcknowledgeAlert(c *gin.Context) {
 			}
 			subject := fmt.Sprintf("[Acknowledged] %s – %s", alert.Device, alert.Title)
 			if err := services.Email.SendNotification(userEmailStr, usernameStr, subject, "alert-acknowledged", custom); err != nil {
-				logger.Warn("Failed to send alert-acknowledged email: %v", err)
+				logger.Error("Failed to send alert-acknowledged email: %v", err)
 			}
 		}()
 	}
@@ -108,6 +115,11 @@ func DismissAlert(c *gin.Context) {
 	id := c.Param("id")
 	username, _ := c.Get("username")
 	usernameStr := fmt.Sprintf("%v", username)
+
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 
 	repo := alertRepo()
 	if repo == nil {
@@ -171,7 +183,7 @@ func DismissAlert(c *gin.Context) {
 			}
 			subject := fmt.Sprintf("[Dismissed] %s – %s", alert.Device, alert.Title)
 			if err := services.Email.SendNotification(userEmailStr, usernameStr, subject, "alert-dismissed", custom); err != nil {
-				logger.Warn("Failed to send alert-dismissed email: %v", err)
+				logger.Error("Failed to send alert-dismissed email: %v", err)
 			}
 		}()
 	}
@@ -188,6 +200,11 @@ func ResolveAlert(c *gin.Context) {
 	id := c.Param("id")
 	username, _ := c.Get("username")
 	usernameStr := fmt.Sprintf("%v", username)
+
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 
 	repo := alertRepo()
 	if repo == nil {
@@ -238,6 +255,14 @@ func ResolveAlert(c *gin.Context) {
 		return
 	}
 
+	// Write to alert_history for the resolution log
+	if dbConn := database.Get(); dbConn != nil && dbConn.DB != nil {
+		dbConn.DB.Exec(
+			`INSERT INTO alert_history (alert_id, title, resolution, severity, created_at) VALUES (?, ?, ?, ?, NOW())`,
+			id, alert.Title, "resolved", alert.Severity,
+		)
+	}
+
 	logger.Info("Alert %s resolved by %s", id, usernameStr)
 
 	// Fetch updated alert
@@ -265,7 +290,7 @@ func ResolveAlert(c *gin.Context) {
 			}
 			subject := fmt.Sprintf("[Resolved] %s – %s", alert.Device, alert.Title)
 			if err := services.Email.SendNotification(userEmailStr, usernameStr, subject, "alert-resolved", custom); err != nil {
-				logger.Warn("Failed to send alert-resolved email: %v", err)
+				logger.Error("Failed to send alert-resolved email: %v", err)
 			}
 		}()
 	}
@@ -331,24 +356,24 @@ func ReanalyzeAlert(c *gin.Context) {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		logger.Error("AI-Core request failed for alert %s: %v", id, err)
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "AI service unavailable", "detail": err.Error()})
+		logger.Warn("AI-Core unavailable for alert %s, returning existing analysis: %v", id, err)
+		c.JSON(http.StatusOK, gin.H{
+			"message":  "AI service is currently offline. Showing existing analysis.",
+			"alert_id": id,
+			"alert":    alert,
+		})
 		return
 	}
 	defer resp.Body.Close()
 
 	// Check if AI-Core returned a non-200 status (e.g. 503 when Watson not configured)
 	if resp.StatusCode != http.StatusOK {
-		var errBody map[string]interface{}
-		json.NewDecoder(resp.Body).Decode(&errBody)
-		detail := "AI service returned an error"
-		if d, ok := errBody["detail"].(string); ok {
-			detail = d
-		} else if e, ok := errBody["error"].(string); ok {
-			detail = e
-		}
-		logger.Error("AI-Core returned %d for alert %s: %s", resp.StatusCode, id, detail)
-		c.JSON(resp.StatusCode, gin.H{"error": detail, "alert": alert})
+		logger.Warn("AI-Core returned %d for alert %s, returning existing analysis", resp.StatusCode, id)
+		c.JSON(http.StatusOK, gin.H{
+			"message":  "AI re-analysis unavailable. Showing existing analysis.",
+			"alert_id": id,
+			"alert":    alert,
+		})
 		return
 	}
 
@@ -415,6 +440,13 @@ type BulkActionResult struct {
 // BulkAlertAction performs an action on multiple alerts at once
 // POST /api/v1/alerts/bulk-action
 func BulkAlertAction(c *gin.Context) {
+	if !requireJSONContentType(c) {
+		return
+	}
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	var req BulkActionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		apiErr := errors.NewBadRequest("Invalid request body: " + err.Error())
@@ -450,6 +482,10 @@ func BulkAlertAction(c *gin.Context) {
 	// Get username from context
 	username, _ := c.Get("username")
 	usernameStr := fmt.Sprintf("%v", username)
+
+	// Extract email from Gin context BEFORE goroutines (context is not goroutine-safe)
+	userEmail, _ := c.Get("email")
+	userEmailStr := fmt.Sprintf("%v", userEmail)
 
 	repo := alertRepo()
 	if repo == nil {
@@ -528,6 +564,59 @@ func BulkAlertAction(c *gin.Context) {
 		}
 
 		result.Succeeded = append(result.Succeeded, alertID)
+
+		// Send action email notification (non-blocking, per-alert)
+		if services.Email != nil && userEmailStr != "" && userEmailStr != "<nil>" {
+			// Capture per-iteration values
+			aID := alertID
+			aTitle := alert.Title
+			aSeverity := alert.Severity
+			aDevice := alert.Device
+			action := req.Action
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				_ = ctx
+
+				var templateName, subjectPrefix, actorField string
+				switch action {
+				case "acknowledge":
+					templateName = "alert-acknowledged"
+					subjectPrefix = "Acknowledged"
+					actorField = "AckedBy"
+				case "resolve":
+					templateName = "alert-resolved"
+					subjectPrefix = "Resolved"
+					actorField = "ResolvedBy"
+				case "dismiss":
+					templateName = "alert-dismissed"
+					subjectPrefix = "Dismissed"
+					actorField = "DismissedBy"
+				default:
+					return
+				}
+
+				custom := map[string]interface{}{
+					"AlertID":   aID,
+					"Title":     aTitle,
+					"Severity":  aSeverity,
+					"Device":    aDevice,
+					actorField:  usernameStr,
+					"Timestamp": time.Now().Format("Jan 2, 2006 3:04 PM"),
+					"ActionURL": fmt.Sprintf("%s/alerts/%s", services.Email.FrontendURL(), aID),
+				}
+				if action == "dismiss" {
+					custom["Reason"] = "Dismissed via bulk action"
+				}
+				if action == "resolve" {
+					custom["Duration"] = "N/A"
+				}
+				subject := fmt.Sprintf("[%s] %s – %s", subjectPrefix, aDevice, aTitle)
+				if err := services.Email.SendNotification(userEmailStr, usernameStr, subject, templateName, custom); err != nil {
+					logger.Error("Failed to send bulk %s email for alert %s: %v", action, aID, err)
+				}
+			}()
+		}
 	}
 
 	logger.Info("Bulk %s by %s: %d succeeded, %d failed",

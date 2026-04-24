@@ -222,6 +222,11 @@ func UpdateUser(c *gin.Context) {
 		return
 	}
 
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
+
 	idStr := c.Param("id")
 	id, err := strconv.ParseUint(idStr, 10, 32)
 	if err != nil {
@@ -363,7 +368,7 @@ func UpdateUser(c *gin.Context) {
 				}
 				subject := fmt.Sprintf("Your role has been updated to %s", req.Role)
 				if err := services.Email.SendNotification(user.Email, user.Username, subject, "account-role-changed", custom); err != nil {
-					logger.Warn("Failed to send role-change email to %s: %v", user.Email, err)
+					logger.Error("Failed to send role-change email to %s: %v", user.Email, err)
 				}
 			}
 			// Account deactivated
@@ -376,7 +381,7 @@ func UpdateUser(c *gin.Context) {
 				}
 				subject := "Your account has been deactivated"
 				if err := services.Email.SendNotification(user.Email, user.Username, subject, "account-deactivated", custom); err != nil {
-					logger.Warn("Failed to send account-deactivated email to %s: %v", user.Email, err)
+					logger.Error("Failed to send account-deactivated email to %s: %v", user.Email, err)
 				}
 			}
 		}()

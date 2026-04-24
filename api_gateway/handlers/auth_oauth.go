@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -22,11 +23,49 @@ import (
 // oauthStateCookieName is the name of the cookie used to store OAuth state for CSRF validation.
 const oauthStateCookieName = "oauth_state"
 
-// generateOAuthState generates a random state for OAuth
+// oauthCodeEntry represents a short-lived one-time exchange code that the
+// frontend can trade for a JWT. This keeps the JWT out of the browser URL
+// entirely (only an opaque short-lived code is redirected through).
+type oauthCodeEntry struct {
+	token     string
+	expiresAt time.Time
+}
+
+// oauthCodes holds short-lived codes issued during the OAuth redirect flow.
+var oauthCodes sync.Map
+
+func init() {
+	// Periodically purge expired exchange codes so the map does not grow
+	// unbounded even if the frontend never calls the exchange endpoint.
+	go func() {
+		ticker := time.NewTicker(60 * time.Second)
+		for range ticker.C {
+			oauthCodes.Range(func(key, value interface{}) bool {
+				if entry, ok := value.(oauthCodeEntry); ok {
+					if time.Now().After(entry.expiresAt) {
+						oauthCodes.Delete(key)
+					}
+				}
+				return true
+			})
+		}
+	}()
+}
+
+// generateOAuthState generates a random state for OAuth.
+// Increased to 32 bytes to provide stronger CSRF protection.
 func generateOAuthState() string {
-	bytes := make([]byte, 16)
+	bytes := make([]byte, 32)
 	rand.Read(bytes)
 	return hex.EncodeToString(bytes)
+}
+
+// generateOAuthExchangeCode returns a random hex-encoded code used as the
+// opaque handle the frontend exchanges for a real JWT.
+func generateOAuthExchangeCode() string {
+	b := make([]byte, 16)
+	rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 // validateRedirectURL validates a redirect URL against allowed frontend origins.
@@ -96,6 +135,7 @@ func GoogleLogin(c *gin.Context) {
 
 	// Store OAuth state in a secure HTTP-only cookie to validate on callback and prevent CSRF attacks
 	isSecure := strings.HasPrefix(config.GetEnv("FRONTEND_URL", "http://localhost:5173"), "https")
+	c.SetSameSite(http.SameSiteStrictMode)
 	c.SetCookie(
 		oauthStateCookieName, // name
 		state,                // value
@@ -123,9 +163,11 @@ func GoogleCallback(c *gin.Context) {
 	frontendURL := config.GetEnv("FRONTEND_URL", "http://localhost:5173")
 	defaultRedirect := frontendURL + "/dashboard"
 
-	// Check for error from Google
+	// Check for error from Google. Do not echo the user-controlled error
+	// parameter into the server log to avoid log-injection risks.
 	if errParam := c.Query("error"); errParam != "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Google OAuth error: " + errParam})
+		logger.Warn("OAuth callback error received")
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Google OAuth error"})
 		return
 	}
 
@@ -145,7 +187,8 @@ func GoogleCallback(c *gin.Context) {
 		return
 	}
 	if stateParam != stateCookie {
-		logger.Warn("OAuth callback: state mismatch (possible CSRF). param=%s cookie=%s", stateParam, stateCookie)
+		// Do not include attacker-controlled values in log messages.
+		logger.Warn("OAuth state mismatch detected")
 		c.Redirect(http.StatusTemporaryRedirect, defaultRedirect+"?error="+url.QueryEscape("OAuth state validation failed"))
 		return
 	}
@@ -229,7 +272,7 @@ func GoogleCallback(c *gin.Context) {
 			// Send welcome email for new Google OAuth users
 			if services.Email != nil {
 				if err := services.Email.SendWelcomeEmail(user.Email, user.Username); err != nil {
-					logger.Warn("Failed to send welcome email to Google OAuth user: %v", err)
+					logger.Error("Failed to send welcome email to Google OAuth user: %v", err)
 				}
 			}
 		} else {
@@ -282,14 +325,47 @@ func GoogleCallback(c *gin.Context) {
 	writeAuditLog(c, "auth.oauth_login", "user", fmt.Sprintf("%d", user.ID),
 		fmt.Sprintf("Google OAuth login successful for %s", user.Email))
 
-	// Redirect to frontend login page with token as URL parameter.
-	// The frontend's LoginPage component reads ?token= and calls setOAuthToken().
-	// Use the origin from the validated redirect URL (preserves the port the user came from).
+	// Redirect to the frontend OAuth callback page with a short-lived one-time
+	// exchange code. The frontend immediately trades the code for the JWT via
+	// GET /api/v1/auth/oauth/exchange, keeping the JWT out of the URL bar,
+	// browser history, and referrer headers.
 	redirectParsed, parseErr := url.Parse(frontendRedirect)
 	redirectBase := frontendURL // fallback
 	if parseErr == nil && redirectParsed.Scheme != "" && redirectParsed.Host != "" {
 		redirectBase = redirectParsed.Scheme + "://" + redirectParsed.Host
 	}
-	loginRedirect := redirectBase + "/login?token=" + url.QueryEscape(jwtToken)
+	exchangeCode := generateOAuthExchangeCode()
+	oauthCodes.Store(exchangeCode, oauthCodeEntry{
+		token:     jwtToken,
+		expiresAt: time.Now().Add(30 * time.Second),
+	})
+	loginRedirect := redirectBase + "/oauth/callback?code=" + exchangeCode
 	c.Redirect(http.StatusTemporaryRedirect, loginRedirect)
+}
+
+// ExchangeOAuthCode trades a short-lived one-time code issued by GoogleCallback
+// for the real JWT. Codes are single-use and expire after 30 seconds.
+func ExchangeOAuthCode(c *gin.Context) {
+	code := c.Query("code")
+	if code == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "code required"})
+		return
+	}
+	val, ok := oauthCodes.Load(code)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired code"})
+		return
+	}
+	// Delete immediately — one-time use, even if expired.
+	oauthCodes.Delete(code)
+	entry, ok := val.(oauthCodeEntry)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired code"})
+		return
+	}
+	if time.Now().After(entry.expiresAt) {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or expired code"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"token": entry.token})
 }

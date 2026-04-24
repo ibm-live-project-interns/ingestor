@@ -62,6 +62,11 @@ func IngestEvent(c *gin.Context) {
 		return
 	}
 
+	if len(req.RawPayload) > 1_000_000 {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "payload too large (max 1MB)"})
+		return
+	}
+
 	repo := alertRepo()
 	if repo == nil {
 		// Demo mode - just acknowledge the event

@@ -47,6 +47,12 @@ func ForgotPassword(c *gin.Context) {
 		return
 	}
 
+	// Invalidate any pre-existing reset token so only the newest token works.
+	db.Model(&models.User{}).Where("id = ?", user.ID).Updates(map[string]interface{}{
+		"reset_token":     "",
+		"reset_token_exp": nil,
+	})
+
 	// Generate reset token
 	resetToken, err := services.Auth.GenerateResetToken()
 	if err != nil {
@@ -66,7 +72,7 @@ func ForgotPassword(c *gin.Context) {
 	// Send password reset email
 	if services.Email != nil {
 		if err := services.Email.SendPasswordResetEmail(user.Email, user.Username, resetToken); err != nil {
-			logger.Warn("Failed to send password reset email: %v", err)
+			logger.Error("Failed to send password reset email: %v", err)
 		}
 	}
 
@@ -87,16 +93,17 @@ func ResetPassword(c *gin.Context) {
 		return
 	}
 
-	// Find user by reset token
+	// Find user by reset token. Use the same error message for both
+	// "not found" and "expired" to avoid leaking token-validity status.
 	var user models.User
 	if err := db.Where("reset_token = ?", req.Token).First(&user).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or expired reset token"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or expired password reset token"})
 		return
 	}
 
 	// Check if token is expired
 	if user.ResetTokenExp == nil || user.ResetTokenExp.Before(time.Now()) {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Reset token has expired"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid or expired password reset token"})
 		return
 	}
 

@@ -177,6 +177,13 @@ func GetRuleByID(c *gin.Context) {
 }
 
 func CreateRule(c *gin.Context) {
+	if !requireJSONContentType(c) {
+		return
+	}
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	var req models.CreateRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		apiErr := errors.NewValidation(err.Error())
@@ -227,6 +234,13 @@ func CreateRule(c *gin.Context) {
 }
 
 func UpdateRule(c *gin.Context) {
+	if !requireJSONContentType(c) {
+		return
+	}
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	id := c.Param("id")
 	var req models.UpdateRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -272,6 +286,10 @@ func UpdateRule(c *gin.Context) {
 }
 
 func DeleteRule(c *gin.Context) {
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	id := c.Param("id")
 	repo := configRepo()
 	if repo == nil {

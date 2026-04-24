@@ -283,6 +283,14 @@ func GetAuditLogs(c *gin.Context) {
 		}
 	}
 
+	// Apply pagination defaults/caps
+	if filter.Limit <= 0 {
+		filter.Limit = 25
+	}
+	if filter.Limit > 200 {
+		filter.Limit = 200
+	}
+
 	// Query audit logs
 	logs, total, err := repo.List(filter)
 	if err != nil {

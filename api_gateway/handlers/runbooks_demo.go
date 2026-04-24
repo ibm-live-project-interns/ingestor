@@ -6,6 +6,42 @@ import (
 )
 
 // ==========================================
+// Demo Data Types
+// ==========================================
+
+// demoRunbookEntry is the internal demo-mode runbook type.
+// It mirrors RunbookResponse but is kept separate so the demo file
+// doesn't conflict with the models.Runbook DB type.
+type demoRunbookEntry struct {
+	ID                int
+	Title             string
+	Category          string
+	Description       string
+	Steps             []RunbookStep
+	RelatedAlertTypes []string
+	Author            string
+	LastUpdated       time.Time
+	UsageCount        int
+	CreatedAt         time.Time
+}
+
+// demoToRunbookResponse converts a demoRunbookEntry to the API RunbookResponse type.
+func demoToRunbookResponse(d demoRunbookEntry) RunbookResponse {
+	return RunbookResponse{
+		ID:                d.ID,
+		Title:             d.Title,
+		Category:          d.Category,
+		Description:       d.Description,
+		Steps:             d.Steps,
+		RelatedAlertTypes: d.RelatedAlertTypes,
+		Author:            d.Author,
+		LastUpdated:       d.LastUpdated,
+		UsageCount:        d.UsageCount,
+		CreatedAt:         d.CreatedAt,
+	}
+}
+
+// ==========================================
 // Demo Data State
 // ==========================================
 
@@ -17,14 +53,11 @@ var nextDemoRunbookID = 11
 
 // demoRunbooks holds the in-memory runbook list for demo mode mutations.
 // All access must be protected by runbookMu.
-var demoRunbooks []Runbook
+var demoRunbooks []demoRunbookEntry
 
 // initDemoRunbooksLocked ensures the demo data is initialized.
-// Caller MUST hold runbookMu (at least read lock) before calling.
-// Returns the current slice. If the slice was nil it initializes it,
-// but that requires a write lock -- so callers that may trigger init
-// should hold a write lock.
-func initDemoRunbooksLocked() []Runbook {
+// Caller MUST hold runbookMu (write lock) before calling.
+func initDemoRunbooksLocked() []demoRunbookEntry {
 	if demoRunbooks == nil {
 		demoRunbooks = getDemoRunbooks()
 	}
@@ -32,10 +65,15 @@ func initDemoRunbooksLocked() []Runbook {
 }
 
 // getDemoRunbookStats computes summary stats from the current demo data.
-func getDemoRunbookStats(runbooks []Runbook) map[string]interface{} {
+func getDemoRunbookStats(runbooks []demoRunbookEntry) map[string]interface{} {
+	if runbooks == nil {
+		runbookMu.Lock()
+		runbooks = initDemoRunbooksLocked()
+		runbookMu.Unlock()
+	}
 	categories := map[string]bool{}
-	var mostUsed Runbook
-	var recentlyUpdated Runbook
+	var mostUsed demoRunbookEntry
+	var recentlyUpdated demoRunbookEntry
 
 	for _, rb := range runbooks {
 		categories[rb.Category] = true
@@ -62,9 +100,9 @@ func getDemoRunbookStats(runbooks []Runbook) map[string]interface{} {
 // ==========================================
 
 // getDemoRunbooks returns realistic demo runbooks for when database is unavailable.
-func getDemoRunbooks() []Runbook {
+func getDemoRunbooks() []demoRunbookEntry {
 	now := time.Now()
-	return []Runbook{
+	return []demoRunbookEntry{
 		{
 			ID:       1,
 			Title:    "Hardware Failure: Switch Module Replacement",

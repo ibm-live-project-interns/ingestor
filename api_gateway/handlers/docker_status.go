@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"os/exec"
@@ -54,7 +55,9 @@ func GetDockerServiceStatus(c *gin.Context) {
 		return
 	}
 
-	services, err := queryDockerContainers()
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
+	services, err := queryDockerContainers(ctx)
 	if err != nil {
 		logger.Warn("Docker query failed (%v), returning inferred service status", err)
 		services = inferredDockerServices()
@@ -129,8 +132,11 @@ func GetDockerServiceLogs(c *gin.Context) {
 	var output []byte
 	var lastErr error
 
+	logCtx, cancelLogs := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancelLogs()
+
 	for _, containerName := range nameCandidates {
-		cmd := exec.Command("docker", "logs", "--tail", tailArg, "--timestamps", containerName)
+		cmd := exec.CommandContext(logCtx, "docker", "logs", "--tail", tailArg, "--timestamps", containerName)
 		out, cmdErr := cmd.CombinedOutput()
 		if cmdErr == nil {
 			output = out
@@ -170,9 +176,10 @@ func GetDockerServiceLogs(c *gin.Context) {
 }
 
 // queryDockerContainers shells out to `docker ps -a` to get container status.
-func queryDockerContainers() ([]DockerServiceInfo, error) {
+// Uses the caller-provided context so the shell-out is bounded by a timeout.
+func queryDockerContainers(ctx context.Context) ([]DockerServiceInfo, error) {
 	// --format with tab-separated fields: name, status, ports, image, label for health
-	cmd := exec.Command(
+	cmd := exec.CommandContext(ctx,
 		"docker", "ps", "-a",
 		"--format", "{{.Names}}\t{{.Status}}\t{{.Ports}}\t{{.Image}}",
 	)
