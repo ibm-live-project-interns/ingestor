@@ -339,9 +339,9 @@ func GoogleCallback(c *gin.Context) {
 	exchangeCode := generateOAuthExchangeCode()
 	oauthCodes.Store(exchangeCode, oauthCodeEntry{
 		token:     jwtToken,
-		expiresAt: time.Now().Add(30 * time.Second),
+		expiresAt: time.Now().Add(5 * time.Minute),
 	})
-	loginRedirect := redirectBase + "/oauth/callback?code=" + exchangeCode
+	loginRedirect := redirectBase + "/login?code=" + exchangeCode
 	c.Redirect(http.StatusTemporaryRedirect, loginRedirect)
 }
 
