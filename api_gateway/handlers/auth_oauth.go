@@ -133,9 +133,11 @@ func GoogleLogin(c *gin.Context) {
 	// Generate state with redirect URL encoded
 	state := generateOAuthState() + ":" + url.QueryEscape(redirectURL)
 
-	// Store OAuth state in a secure HTTP-only cookie to validate on callback and prevent CSRF attacks
+	// Store OAuth state in a secure HTTP-only cookie to validate on callback and prevent CSRF attacks.
+	// SameSite=Lax (not Strict) is required: Google redirects back via a cross-site top-level
+	// navigation, and Strict cookies are not sent in that case — causing state validation failure.
 	isSecure := strings.HasPrefix(config.GetEnv("FRONTEND_URL", "http://localhost:5173"), "https")
-	c.SetSameSite(http.SameSiteStrictMode)
+	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(
 		oauthStateCookieName, // name
 		state,                // value
