@@ -98,8 +98,12 @@ func main() {
 				logger.Debug("runbooks jsonb migration skipped: %v", err)
 			}
 
-			// Auto-migrate tables that may not exist in the init.sql schema
+			// Auto-migrate: adds new columns to existing tables, never drops columns.
+			// User and Session are included so OAuth columns (google_id, etc.) are
+			// added when upgrading an existing DB that pre-dates them.
 			if err := db.AutoMigrate(
+				&models.User{},
+				&models.Session{},
 				&models.AuditLog{},
 				&models.OnCallSchedule{},
 				&models.OnCallOverride{},

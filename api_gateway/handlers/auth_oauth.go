@@ -271,12 +271,17 @@ func GoogleCallback(c *gin.Context) {
 		result := db.Where("email = ?", userInfo.Email).First(&user)
 
 		if result.Error != nil {
-			// User doesn't exist, create new user
+			// User doesn't exist, create new user.
+			// Password is NOT NULL in the schema; Google OAuth users have no password
+			// so we store a random hex string that is not a valid bcrypt hash —
+			// it can never match any login attempt.
+			oauthPasswordPlaceholder := "oauth:" + generateOAuthState()
 			user = models.User{
 				Email:         userInfo.Email,
 				Username:      strings.Split(userInfo.Email, "@")[0],
 				FirstName:     userInfo.GivenName,
 				LastName:      userInfo.FamilyName,
+				Password:      oauthPasswordPlaceholder,
 				GoogleID:      userInfo.ID,
 				Role:          "network-ops",
 				IsActive:      true,
