@@ -1,11 +1,15 @@
 package handlers
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -68,10 +72,64 @@ func generateOAuthExchangeCode() string {
 	return hex.EncodeToString(b)
 }
 
+// computeOAuthStateHMAC signs payload with JWT_SECRET.
+// Using HMAC instead of cookies means the state is self-validating and
+// works correctly behind any proxy that strips or doesn't forward cookies.
+func computeOAuthStateHMAC(payload string) string {
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		secret = "noc-platform-dev-secret-key-2026"
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write([]byte(payload))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
+// buildOAuthState creates a tamper-proof state: nonce|b64(redirect)|hmac
+func buildOAuthState(redirectURL string) string {
+	nonce := generateOAuthState()
+	encoded := base64.RawURLEncoding.EncodeToString([]byte(redirectURL))
+	payload := nonce + "|" + encoded
+	return payload + "|" + computeOAuthStateHMAC(payload)
+}
+
+// parseOAuthState validates the HMAC and returns the redirect URL.
+// Returns ("", false) if the state is invalid or tampered.
+func parseOAuthState(state string) (string, bool) {
+	parts := strings.SplitN(state, "|", 3)
+	if len(parts) != 3 {
+		return "", false
+	}
+	payload := parts[0] + "|" + parts[1]
+	if !hmac.Equal([]byte(parts[2]), []byte(computeOAuthStateHMAC(payload))) {
+		return "", false
+	}
+	redirectBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", false
+	}
+	return string(redirectBytes), true
+}
+
+// resolvedFrontendURL returns FRONTEND_URL, auto-upgrading to the first
+// non-localhost CORS origin when FRONTEND_URL is still pointing at localhost.
+func resolvedFrontendURL() string {
+	frontendURL := config.GetEnv("FRONTEND_URL", "http://localhost:5173")
+	if strings.HasPrefix(frontendURL, "http://localhost") {
+		for _, origin := range strings.Split(config.GetEnv("CORS_ALLOWED_ORIGINS", ""), ",") {
+			origin = strings.TrimSpace(origin)
+			if origin != "" && !strings.HasPrefix(origin, "http://localhost") {
+				return origin
+			}
+		}
+	}
+	return frontendURL
+}
+
 // validateRedirectURL validates a redirect URL against allowed frontend origins.
 // Prevents open redirect attacks by only allowing redirects to known frontend URLs.
 func validateRedirectURL(redirectURL string) string {
-	frontendURL := config.GetEnv("FRONTEND_URL", "http://localhost:5173")
+	frontendURL := resolvedFrontendURL()
 	defaultRedirect := frontendURL + "/dashboard"
 
 	if redirectURL == "" {
@@ -130,23 +188,9 @@ func GoogleLogin(c *gin.Context) {
 	redirectURL := c.Query("redirect")
 	redirectURL = validateRedirectURL(redirectURL)
 
-	// Generate state with redirect URL encoded
-	state := generateOAuthState() + ":" + url.QueryEscape(redirectURL)
-
-	// Store OAuth state in a secure HTTP-only cookie to validate on callback and prevent CSRF attacks.
-	// SameSite=Lax (not Strict) is required: Google redirects back via a cross-site top-level
-	// navigation, and Strict cookies are not sent in that case — causing state validation failure.
-	isSecure := strings.HasPrefix(config.GetEnv("FRONTEND_URL", "http://localhost:5173"), "https")
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(
-		oauthStateCookieName, // name
-		state,                // value
-		600,                  // maxAge: 10 minutes
-		"/",                  // path
-		"",                   // domain (auto from request)
-		isSecure,             // secure
-		true,                 // httpOnly
-	)
+	// Build HMAC-signed state — embeds redirect URL and signature so no
+	// server-side session or cookie is required (works behind any proxy).
+	state := buildOAuthState(redirectURL)
 
 	// Get Google authorization URL
 	authURL := services.Google.GetAuthURL(state)
@@ -162,50 +206,30 @@ func GoogleCallback(c *gin.Context) {
 		return
 	}
 
-	frontendURL := config.GetEnv("FRONTEND_URL", "http://localhost:5173")
+	frontendURL := resolvedFrontendURL()
 	defaultRedirect := frontendURL + "/dashboard"
 
-	// Check for error from Google. Do not echo the user-controlled error
-	// parameter into the server log to avoid log-injection risks.
+	// Check for error from Google
 	if errParam := c.Query("error"); errParam != "" {
 		logger.Warn("OAuth callback error received")
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Google OAuth error"})
+		c.Redirect(http.StatusTemporaryRedirect, defaultRedirect+"?error=oauth_failed")
 		return
 	}
 
 	// Get authorization code
 	code := c.Query("code")
 	if code == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Missing authorization code"})
+		c.Redirect(http.StatusTemporaryRedirect, defaultRedirect+"?error=oauth_failed")
 		return
 	}
 
-	// Validate OAuth state against cookie to prevent CSRF attacks
+	// Validate HMAC-signed state — no cookie required, works behind any proxy
 	stateParam := c.Query("state")
-	stateCookie, cookieErr := c.Cookie(oauthStateCookieName)
-	if cookieErr != nil || stateCookie == "" {
-		logger.Warn("OAuth callback: missing state cookie (possible CSRF)")
-		c.Redirect(http.StatusTemporaryRedirect, defaultRedirect+"?error="+url.QueryEscape("OAuth state validation failed"))
+	rawRedirect, stateOK := parseOAuthState(stateParam)
+	if !stateOK {
+		logger.Warn("OAuth callback: invalid or tampered state parameter")
+		c.Redirect(http.StatusTemporaryRedirect, defaultRedirect+"?error=oauth_state_failed")
 		return
-	}
-	if stateParam != stateCookie {
-		// Do not include attacker-controlled values in log messages.
-		logger.Warn("OAuth state mismatch detected")
-		c.Redirect(http.StatusTemporaryRedirect, defaultRedirect+"?error="+url.QueryEscape("OAuth state validation failed"))
-		return
-	}
-
-	// Clear the state cookie now that it's been validated
-	isSecure := strings.HasPrefix(frontendURL, "https")
-	c.SetCookie(oauthStateCookieName, "", -1, "/", "", isSecure, true)
-
-	// Parse state to get redirect URL, then validate against allowed origins
-	var rawRedirect string
-	if parts := strings.SplitN(stateParam, ":", 2); len(parts) == 2 {
-		decoded, err := url.QueryUnescape(parts[1])
-		if err == nil {
-			rawRedirect = decoded
-		}
 	}
 	frontendRedirect := validateRedirectURL(rawRedirect)
 
@@ -213,7 +237,7 @@ func GoogleCallback(c *gin.Context) {
 	token, err := services.Google.ExchangeCode(c.Request.Context(), code)
 	if err != nil {
 		logger.Error("Failed to exchange Google code: %v", err)
-		c.Redirect(http.StatusTemporaryRedirect, frontendRedirect+"?error="+url.QueryEscape("Failed to authenticate with Google"))
+		c.Redirect(http.StatusTemporaryRedirect, frontendRedirect+"?error=oauth_failed")
 		return
 	}
 
@@ -221,7 +245,7 @@ func GoogleCallback(c *gin.Context) {
 	userInfo, err := services.Google.GetUserInfo(c.Request.Context(), token)
 	if err != nil {
 		logger.Error("Failed to get Google user info: %v", err)
-		c.Redirect(http.StatusTemporaryRedirect, frontendRedirect+"?error="+url.QueryEscape("Failed to get user info from Google"))
+		c.Redirect(http.StatusTemporaryRedirect, frontendRedirect+"?error=user_info_failed")
 		return
 	}
 
@@ -267,7 +291,7 @@ func GoogleCallback(c *gin.Context) {
 
 			if err := db.Create(&user).Error; err != nil {
 				logger.Error("Failed to create Google user: %v", err)
-				c.Redirect(http.StatusTemporaryRedirect, frontendRedirect+"?error="+url.QueryEscape("Failed to create user account"))
+				c.Redirect(http.StatusTemporaryRedirect, frontendRedirect+"?error=account_creation_failed")
 				return
 			}
 
@@ -300,7 +324,7 @@ func GoogleCallback(c *gin.Context) {
 		logger.Warn("OAuth login rejected: account deactivated for %s", user.Email)
 		writeAuditLogWithResult(c, "auth.oauth_login", "user", fmt.Sprintf("%d", user.ID),
 			fmt.Sprintf("OAuth login rejected: account deactivated for %s", user.Email), "failure")
-		c.Redirect(http.StatusTemporaryRedirect, frontendRedirect+"?error="+url.QueryEscape("Account deactivated. Please contact an administrator."))
+		c.Redirect(http.StatusTemporaryRedirect, frontendRedirect+"?error=account_deactivated")
 		return
 	}
 
@@ -308,7 +332,7 @@ func GoogleCallback(c *gin.Context) {
 	jwtToken, err := services.Auth.GenerateToken(&user)
 	if err != nil {
 		logger.Error("Failed to generate JWT for Google user: %v", err)
-		c.Redirect(http.StatusTemporaryRedirect, frontendRedirect+"?error="+url.QueryEscape("Failed to generate authentication token"))
+		c.Redirect(http.StatusTemporaryRedirect, frontendRedirect+"?error=token_generation_failed")
 		return
 	}
 
