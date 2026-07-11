@@ -123,6 +123,7 @@ func Register(c *gin.Context) {
 	}
 
 	if err := db.Create(&user).Error; err != nil {
+		logger.Error("Failed to create user in DB: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
 	}
