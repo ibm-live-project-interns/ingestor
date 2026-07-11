@@ -88,7 +88,7 @@ func extractJSON(text string) string {
 
 /* ---------------- CALL WATSONX ---------------- */
 
-func CallWatsonAI(event Event) (UnifiedResponse, error) {
+func CallWatsonAI(event Event, cves []CVE) (UnifiedResponse, error) {
 	apiKey := os.Getenv("WATSONX_API_KEY")
 	region := os.Getenv("WATSONX_REGION")
 	projectID := os.Getenv("WATSONX_PROJECT_ID")
@@ -107,23 +107,26 @@ func CallWatsonAI(event Event) (UnifiedResponse, error) {
 		region,
 	)
 
-	// ✅ REQUIRED PROMPT FORMAT (as per spec)
+	// Build RAG context from relevant CVEs
+	ragPart := BuildCVERagBlockFromList(cves)
+
 	prompt := fmt.Sprintf(
-		`<System data>
+		`%s<System data>
 Event type: %s
 Event message: %s
 </System data>
 
 <Instructions>
-Use the system data to answer the question.
-Do NOT mention system data or how you derived the answer.
-Respond ONLY in valid JSON with fields:
+You are a network operations AI analyst. Analyze the event and respond ONLY in valid JSON with fields:
 severity, explanation, recommended_action.
+Use CVE data from the Rag block ONLY if it is directly relevant to the event.
+Do NOT mention RAG, system data, or how you derived the answer.
 </Instructions>
 
 <Question>
 What is the severity of the event and what action should be taken?
 </Question>`,
+		ragPart,
 		event.Type,
 		event.Message,
 	)
@@ -134,7 +137,7 @@ What is the severity of the event and what action should be taken?
 		"input":      prompt,
 		"parameters": map[string]interface{}{
 			"temperature":    0.2,
-			"max_new_tokens": 200,
+			"max_new_tokens": 400,
 		},
 	}
 

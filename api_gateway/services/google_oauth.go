@@ -13,6 +13,7 @@ import (
 	"golang.org/x/oauth2/google"
 
 	"github.com/ibm-live-project-interns/ingestor/shared/config"
+	"github.com/ibm-live-project-interns/ingestor/shared/logger"
 )
 
 // GoogleOAuthService handles Google OAuth operations
@@ -40,7 +41,7 @@ func InitGoogleOAuth() error {
 
 	if clientID == "" || clientSecret == "" {
 		// Google OAuth is optional - just log and continue
-		fmt.Println("[GoogleOAuth] GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not set, Google OAuth disabled")
+		logger.Info("GoogleOAuth: GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not set, Google OAuth disabled")
 		Google = nil
 		return nil
 	}
@@ -60,7 +61,7 @@ func InitGoogleOAuth() error {
 		},
 	}
 
-	fmt.Printf("[GoogleOAuth] Initialized with redirect URL: %s\n", redirectURL)
+	logger.Info("GoogleOAuth initialized with redirect URL: %s", redirectURL)
 	return nil
 }
 

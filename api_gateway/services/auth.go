@@ -87,6 +87,11 @@ func (a *AuthService) VerifyPassword(hashedPassword, password string) error {
 func (a *AuthService) GenerateToken(user *models.User) (string, error) {
 	now := time.Now()
 
+	jti, err := generateJTI()
+	if err != nil {
+		return "", fmt.Errorf("failed to generate token id: %w", err)
+	}
+
 	claims := CustomClaims{
 		UserID:      user.ID,
 		Username:    user.Username,
@@ -100,7 +105,7 @@ func (a *AuthService) GenerateToken(user *models.User) (string, error) {
 			ExpiresAt: jwt.NewNumericDate(now.Add(a.jwtExpiry)),
 			NotBefore: jwt.NewNumericDate(now),
 			IssuedAt:  jwt.NewNumericDate(now),
-			ID:        generateJTI(),
+			ID:        jti,
 		},
 	}
 
@@ -169,11 +174,15 @@ func (a *AuthService) GenerateResetToken() (string, error) {
 	return a.GenerateVerificationToken()
 }
 
-// generateJTI generates a unique JWT ID
-func generateJTI() string {
+// generateJTI generates a unique JWT ID.
+// Returns an error if the underlying crypto/rand read fails so callers
+// never silently generate a weak or zero-valued JTI.
+func generateJTI() (string, error) {
 	bytes := make([]byte, 16)
-	rand.Read(bytes)
-	return hex.EncodeToString(bytes)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", fmt.Errorf("failed to generate JTI: %w", err)
+	}
+	return hex.EncodeToString(bytes), nil
 }
 
 // GetRolePermissionsStrings returns permissions for a role as strings (for API responses)

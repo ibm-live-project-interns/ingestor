@@ -132,18 +132,6 @@ func joinRoles(roles []rbac.RoleID) string {
 	return strings.Join(strs, " or ")
 }
 
-// InjectRoleFromHeader is a helper for testing - extracts role from X-Role header
-// DO NOT USE IN PRODUCTION - use JWT claims instead
-func InjectRoleFromHeader() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		roleHeader := c.GetHeader("X-Role")
-		if roleHeader != "" && rbac.IsValidRole(roleHeader) {
-			c.Set("role", roleHeader)
-		}
-		c.Next()
-	}
-}
-
 // GetUserRole extracts the role from gin context
 func GetUserRole(c *gin.Context) (rbac.RoleID, bool) {
 	roleInterface, exists := c.Get("role")

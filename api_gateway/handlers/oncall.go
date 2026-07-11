@@ -6,7 +6,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/ibm-live-project-interns/ingestor/shared/database"
 	"github.com/ibm-live-project-interns/ingestor/shared/logger"
+	"github.com/ibm-live-project-interns/ingestor/shared/models"
 )
 
 // ==========================================
@@ -221,16 +223,60 @@ func getDemoOverrides() []ScheduleOverride {
 // Handlers
 // ==========================================
 
-// GetCurrentOnCall returns the people currently on call
+// GetCurrentOnCall returns the people currently on call.
+// Queries the real on_call_schedules table first; falls back to demo data
+// if the database is unavailable or if DEMO_MODE=true.
 // GET /api/v1/on-call/current
 func GetCurrentOnCall(c *gin.Context) {
 	// No admin restriction -- all authenticated users can view who is on call
 
-	// No on-call database table exists yet, so always return demo data.
-	// When a real table is created, add a repo check here following the same
-	// pattern as userRepo() / auditRepo(): return nil => demo mode.
-	logger.Info("On-Call: returning current on-call data (demo mode)")
+	db := database.Get()
+	if db != nil && db.DB != nil {
+		now := time.Now().UTC()
+		var schedules []models.OnCallSchedule
+		err := db.Where("start_time <= ? AND end_time >= ?", now, now).
+			Order("is_primary DESC, username ASC").
+			Find(&schedules).Error
 
+		if err == nil && len(schedules) > 0 {
+			// Convert DB schedules to the OnCallPerson response format
+			currentOnCall := make([]OnCallPerson, 0, len(schedules))
+			for _, s := range schedules {
+				shiftType := "Day Shift"
+				hour := now.Hour()
+				if hour >= 18 || hour < 6 {
+					shiftType = "Night Shift"
+				}
+
+				currentOnCall = append(currentOnCall, OnCallPerson{
+					ID:        s.UserID,
+					Name:      s.Username,
+					Role:      s.RotationType + " rotation",
+					Team:      "On-Call",
+					ShiftType: shiftType,
+					StartTime: s.StartTime.Format(time.RFC3339),
+					EndTime:   s.EndTime.Format(time.RFC3339),
+					Status:    "active",
+				})
+			}
+
+			logger.Info("On-Call: returning %d active schedules from database", len(currentOnCall))
+			c.JSON(http.StatusOK, gin.H{
+				"on_call":   currentOnCall,
+				"total":     len(currentOnCall),
+				"timestamp": now.Format(time.RFC3339),
+			})
+			return
+		}
+
+		// DB available but no active schedules found; fall through to demo data
+		if err != nil {
+			logger.Warn("On-Call: database query failed: %v, falling back to demo data", err)
+		}
+	}
+
+	// Demo data fallback
+	logger.Info("On-Call: returning current on-call data (demo mode)")
 	currentOnCall := getDemoCurrentOnCall()
 
 	c.JSON(http.StatusOK, gin.H{
@@ -240,16 +286,84 @@ func GetCurrentOnCall(c *gin.Context) {
 	})
 }
 
-// GetOnCallSchedule returns the weekly on-call schedule with overrides
+// GetOnCallSchedule returns the weekly on-call schedule with overrides.
+// Queries DB first; falls back to demo data if DB unavailable or empty.
 // GET /api/v1/on-call/schedule
 func GetOnCallSchedule(c *gin.Context) {
-	// No admin restriction -- all authenticated users can view the schedule
+	db := database.Get()
+	if db != nil && db.DB != nil {
+		now := time.Now().UTC()
 
+		// Week boundaries (Monday – Sunday)
+		weekday := int(now.Weekday())
+		monday := now.AddDate(0, 0, -((weekday+6)%7))
+		monday = time.Date(monday.Year(), monday.Month(), monday.Day(), 0, 0, 0, 0, monday.Location())
+		sunday := monday.AddDate(0, 0, 7)
+
+		var schedules []models.OnCallSchedule
+		err := db.Where("start_time < ? AND end_time > ?", sunday, monday).
+			Order("start_time ASC, is_primary DESC").
+			Find(&schedules).Error
+
+		if err == nil && len(schedules) > 0 {
+			dayNames := []string{"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
+			schedule := make([]ScheduleEntry, 7)
+			for i := 0; i < 7; i++ {
+				day := monday.AddDate(0, 0, i)
+				isToday := day.Year() == now.Year() && day.YearDay() == now.YearDay()
+				shiftHours := "06:00 - 18:00 / 18:00 - 06:00"
+				if i >= 5 {
+					shiftHours = "08:00 - 20:00 / 20:00 - 08:00"
+				}
+				entry := ScheduleEntry{
+					Day:        dayNames[i],
+					Date:       day.Format("2006-01-02"),
+					ShiftHours: shiftHours,
+					IsToday:    isToday,
+				}
+				for _, s := range schedules {
+					if s.StartTime.Before(day.AddDate(0, 0, 1)) && s.EndTime.After(day) {
+						if s.IsPrimary && entry.PrimaryOnCall == "" {
+							entry.PrimaryOnCall = s.Username
+							entry.PrimaryTeam = s.RotationType
+						} else if !s.IsPrimary && entry.SecondaryOnCall == "" {
+							entry.SecondaryOnCall = s.Username
+							entry.SecondaryTeam = s.RotationType
+						}
+					}
+				}
+				schedule[i] = entry
+			}
+
+			var dbOverrides []models.OnCallOverride
+			db.Where("start_time > ?", now).Order("start_time ASC").Limit(10).Find(&dbOverrides)
+			overrides := make([]ScheduleOverride, 0, len(dbOverrides))
+			for _, o := range dbOverrides {
+				overrides = append(overrides, ScheduleOverride{
+					ID:     o.ID,
+					Date:   o.StartTime.Format("2006-01-02"),
+					Reason: o.Reason,
+					Status: "approved",
+				})
+			}
+
+			logger.Info("On-Call: returning weekly schedule from database (%d schedules)", len(schedules))
+			c.JSON(http.StatusOK, gin.H{
+				"schedule":  schedule,
+				"overrides": overrides,
+				"week_of":   schedule[0].Date,
+			})
+			return
+		}
+		if err != nil {
+			logger.Warn("On-Call: schedule query failed: %v, falling back to demo", err)
+		}
+	}
+
+	// Demo data fallback
 	logger.Info("On-Call: returning schedule data (demo mode)")
-
 	schedule := getDemoSchedule()
 	overrides := getDemoOverrides()
-
 	c.JSON(http.StatusOK, gin.H{
 		"schedule":  schedule,
 		"overrides": overrides,

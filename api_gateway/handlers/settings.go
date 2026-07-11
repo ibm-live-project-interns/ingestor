@@ -92,3 +92,103 @@ func UpdateNotificationPreferences(c *gin.Context) {
 		"preferences": req,
 	})
 }
+
+// UIPreferences represents theme, language, timezone, and refresh settings
+type UIPreferences struct {
+	Theme           string `json:"theme"`
+	Language        string `json:"language"`
+	Timezone        string `json:"timezone"`
+	AutoRefresh     bool   `json:"autoRefresh"`
+	RefreshInterval string `json:"refreshInterval"`
+}
+
+// GetUIPreferences returns the current user's UI preferences
+func GetUIPreferences(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Not authenticated"})
+		return
+	}
+
+	db := database.Get()
+	if db == nil {
+		c.JSON(http.StatusOK, UIPreferences{Theme: "system", Language: "en", Timezone: "UTC", AutoRefresh: true, RefreshInterval: "30"})
+		return
+	}
+
+	var user models.User
+	if err := db.First(&user, userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	theme := user.Theme
+	if theme == "" {
+		theme = "system"
+	}
+	lang := user.Language
+	if lang == "" {
+		lang = "en"
+	}
+	tz := user.Timezone
+	if tz == "" {
+		tz = "UTC"
+	}
+	interval := user.RefreshInterval
+	if interval == "" {
+		interval = "30"
+	}
+
+	c.JSON(http.StatusOK, UIPreferences{
+		Theme:           theme,
+		Language:        lang,
+		Timezone:        tz,
+		AutoRefresh:     user.AutoRefresh,
+		RefreshInterval: interval,
+	})
+}
+
+// UpdateUIPreferences persists the current user's UI preferences to the database
+func UpdateUIPreferences(c *gin.Context) {
+	userID, exists := c.Get("userID")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Not authenticated"})
+		return
+	}
+
+	var req UIPreferences
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Validate theme
+	validThemes := map[string]bool{"light": true, "dark": true, "system": true}
+	if req.Theme != "" && !validThemes[req.Theme] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid theme. Use light, dark, or system"})
+		return
+	}
+
+	db := database.Get()
+	if db == nil {
+		// Demo mode — accept silently
+		c.JSON(http.StatusOK, gin.H{"message": "UI preferences updated", "preferences": req})
+		return
+	}
+
+	updates := map[string]interface{}{
+		"theme":            req.Theme,
+		"language":         req.Language,
+		"timezone":         req.Timezone,
+		"auto_refresh":     req.AutoRefresh,
+		"refresh_interval": req.RefreshInterval,
+	}
+	if err := db.Model(&models.User{}).Where("id = ?", userID).Updates(updates).Error; err != nil {
+		logger.Error("Failed to update UI preferences for user %v: %v", userID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update preferences"})
+		return
+	}
+
+	logger.Info("Updated UI preferences for user %v: theme=%s lang=%s tz=%s", userID, req.Theme, req.Language, req.Timezone)
+	c.JSON(http.StatusOK, gin.H{"message": "UI preferences updated", "preferences": req})
+}

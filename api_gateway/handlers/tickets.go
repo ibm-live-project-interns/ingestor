@@ -16,6 +16,9 @@ import (
 	"github.com/ibm-live-project-interns/ingestor/shared/models"
 )
 
+// timePtr returns a pointer to the given time.Time value.
+func timePtr(t time.Time) *time.Time { return &t }
+
 // sendTicketEmailNotification sends email notifications for ticket events asynchronously.
 // It notifies the assignee (if set and different from actor) and any active users with email_alerts enabled.
 func sendTicketEmailNotification(ticket models.Ticket, eventType, eventMessage, comment, commentAuthor string) {
@@ -36,26 +39,23 @@ func sendTicketEmailNotification(ticket models.Ticket, eventType, eventMessage, 
 		CommentAuthor: commentAuthor,
 	}
 
-	// If ticket has an assignee, try to find their email and notify them
+	// If ticket has an assignee, look up their email with a targeted query and notify them
 	if ticket.Assignee != "" {
 		db := database.Get()
 		if db != nil && db.DB != nil {
 			userRepo := database.NewUserRepository(db.DB)
-			// Try to find user by username or email
-			users, _, _ := userRepo.GetAll(database.UserFilter{})
-			for _, u := range users {
-				if (u.Username == ticket.Assignee || u.Email == ticket.Assignee ||
-					u.FirstName+" "+u.LastName == ticket.Assignee) && u.IsActive && u.EmailAlerts {
-					username := u.FirstName
-					if username == "" {
-						username = u.Username
-					}
-					if err := services.Email.SendTicketNotification(u.Email, username, emailData); err != nil {
-						logger.Error("Failed to send ticket notification to %s: %v", u.Email, err)
-					} else {
-						logger.Info("Sent ticket %s notification to assignee %s", eventType, u.Email)
-					}
-					break
+			u, err := userRepo.GetByUsernameOrEmail(ticket.Assignee)
+			if err != nil {
+				logger.Error("Failed to look up assignee %s for ticket notification: %v", ticket.Assignee, err)
+			} else if u != nil {
+				username := u.FirstName
+				if username == "" {
+					username = u.Username
+				}
+				if err := services.Email.SendTicketNotification(u.Email, username, emailData); err != nil {
+					logger.Error("Failed to send ticket notification to %s: %v", u.Email, err)
+				} else {
+					logger.Info("Sent ticket %s notification to assignee %s", eventType, u.Email)
 				}
 			}
 		}
@@ -117,114 +117,6 @@ func resolveDeviceNames(tickets []models.Ticket) {
 	}
 }
 
-// getDemoTickets returns demo tickets for when database is unavailable
-func getDemoTickets() []models.Ticket {
-	now := time.Now()
-	alertID1 := "ALT-001"
-	alertID3 := "ALT-003"
-	alertID5 := "ALT-005"
-	deviceID1 := "router-core-01"
-	deviceID2 := "server-app-01"
-	deviceID4 := "db-prod-01"
-	return []models.Ticket{
-		{
-			ID:          "TKT-001",
-			Title:       "Network Latency Issue - Core Router",
-			Description: "High latency detected on core router affecting multiple segments",
-			Priority:    "high",
-			Status:      models.TicketStatusOpen,
-			Category:    "Network",
-			Assignee:    "John Smith",
-			Reporter:    "System",
-			AlertID:     &alertID1,
-			DeviceID:    &deviceID1,
-			DeviceName:  "Core Router 01",
-			CreatedAt:   now.Add(-2 * time.Hour),
-			UpdatedAt:   now.Add(-30 * time.Minute),
-		},
-		{
-			ID:          "TKT-002",
-			Title:       "Server Memory Utilization Alert",
-			Description: "Server memory usage exceeded 85% threshold",
-			Priority:    "medium",
-			Status:      models.TicketStatusInProgress,
-			Category:    "Server",
-			Assignee:    "Jane Doe",
-			Reporter:    "Admin",
-			AlertID:     &alertID3,
-			DeviceID:    &deviceID2,
-			DeviceName:  "App Server 01",
-			CreatedAt:   now.Add(-5 * time.Hour),
-			UpdatedAt:   now.Add(-1 * time.Hour),
-		},
-		{
-			ID:          "TKT-003",
-			Title:       "Firewall Configuration Review",
-			Description: "Security audit required for firewall rule changes",
-			Priority:    "low",
-			Status:      models.TicketStatusOpen,
-			Category:    "Security",
-			Assignee:    "",
-			Reporter:    "Security Team",
-			DeviceName:  "FW-DMZ-03",
-			CreatedAt:   now.Add(-24 * time.Hour),
-			UpdatedAt:   now.Add(-24 * time.Hour),
-		},
-		{
-			ID:          "TKT-004",
-			Title:       "Critical - Database Connection Pool Exhausted",
-			Description: "Production database experiencing connection pool exhaustion",
-			Priority:    "critical",
-			Status:      models.TicketStatusInProgress,
-			Category:    "Database",
-			Assignee:    "DBA Team",
-			Reporter:    "Monitoring System",
-			AlertID:     &alertID5,
-			DeviceID:    &deviceID4,
-			DeviceName:  "Production DB 01",
-			CreatedAt:   now.Add(-1 * time.Hour),
-			UpdatedAt:   now.Add(-15 * time.Minute),
-		},
-		{
-			ID:          "TKT-005",
-			Title:       "Scheduled Maintenance - Switch Upgrade",
-			Description: "Planned upgrade of distribution switches in Building A",
-			Priority:    "low",
-			Status:      models.TicketStatusResolved,
-			Category:    "Network",
-			Assignee:    "Network Team",
-			Reporter:    "Change Management",
-			DeviceName:  "Distribution Switch A",
-			CreatedAt:   now.Add(-72 * time.Hour),
-			UpdatedAt:   now.Add(-48 * time.Hour),
-		},
-	}
-}
-
-// getDemoTicketStats returns demo stats for when database is unavailable
-func getDemoTicketStats() map[string]interface{} {
-	return map[string]interface{}{
-		"total":       15,
-		"open":        6,
-		"in_progress": 4,
-		"resolved":    3,
-		"closed":      2,
-		"by_priority": map[string]int64{
-			"critical": 2,
-			"high":     4,
-			"medium":   5,
-			"low":      4,
-		},
-		"by_category": map[string]int64{
-			"Network":  5,
-			"Server":   4,
-			"Security": 3,
-			"Database": 3,
-		},
-		"avg_resolution_hours": 4.2,
-	}
-}
-
 // GetTickets returns all tickets with optional filtering
 func GetTickets(c *gin.Context) {
 	repo := ticketRepo()
@@ -245,6 +137,14 @@ func GetTickets(c *gin.Context) {
 		Assignee: c.Query("assignee"),
 	}
 
+	// Validate query parameter lengths (max 255 chars)
+	for _, v := range []string{filter.Priority, filter.Status, filter.Category, filter.Assignee} {
+		if len(v) > 255 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "query parameter too long"})
+			return
+		}
+	}
+
 	// Parse pagination
 	if limitStr := c.Query("limit"); limitStr != "" {
 		if limit, err := strconv.Atoi(limitStr); err == nil {
@@ -255,6 +155,14 @@ func GetTickets(c *gin.Context) {
 		if offset, err := strconv.Atoi(offsetStr); err == nil {
 			filter.Offset = offset
 		}
+	}
+
+	// Apply pagination defaults/caps
+	if filter.Limit <= 0 {
+		filter.Limit = 25
+	}
+	if filter.Limit > 200 {
+		filter.Limit = 200
 	}
 
 	tickets, total, err := repo.List(filter)
@@ -316,6 +224,13 @@ func GetTicketByID(c *gin.Context) {
 
 // CreateTicket creates a new ticket
 func CreateTicket(c *gin.Context) {
+	if !requireJSONContentType(c) {
+		return
+	}
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	var req models.CreateTicketRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		apiErr := errors.NewValidation(err.Error())
@@ -412,6 +327,13 @@ func CreateTicket(c *gin.Context) {
 
 // UpdateTicket updates an existing ticket
 func UpdateTicket(c *gin.Context) {
+	if !requireJSONContentType(c) {
+		return
+	}
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	id := c.Param("id")
 
 	var req models.UpdateTicketRequest
@@ -592,6 +514,10 @@ func ExportTickets(c *gin.Context) {
 
 // DeleteTicket soft deletes a ticket
 func DeleteTicket(c *gin.Context) {
+	if isDemoMode() {
+		c.JSON(http.StatusOK, gin.H{"message": "Action recorded (demo mode)", "demo": true})
+		return
+	}
 	id := c.Param("id")
 
 	repo := ticketRepo()
@@ -630,156 +556,5 @@ func DeleteTicket(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message":   "Ticket deleted successfully",
 		"ticket_id": id,
-	})
-}
-
-// getDemoComments returns demo comments for when database is unavailable
-func getDemoComments(ticketID string) []models.Comment {
-	now := time.Now()
-	return []models.Comment{
-		{
-			ID:        fmt.Sprintf("CMT-%s-001", ticketID),
-			TicketID:  ticketID,
-			Author:    "John Smith",
-			Content:   "Initial investigation started. Checking network logs for anomalies.",
-			CreatedAt: now.Add(-1 * time.Hour),
-			UpdatedAt: now.Add(-1 * time.Hour),
-		},
-		{
-			ID:        fmt.Sprintf("CMT-%s-002", ticketID),
-			TicketID:  ticketID,
-			Author:    "Jane Doe",
-			Content:   "Found potential root cause. Interface flapping detected on port Gi0/1.",
-			CreatedAt: now.Add(-30 * time.Minute),
-			UpdatedAt: now.Add(-30 * time.Minute),
-		},
-	}
-}
-
-// GetTicketComments returns all comments for a ticket
-func GetTicketComments(c *gin.Context) {
-	ticketID := c.Param("id")
-
-	repo := ticketRepo()
-	if repo == nil {
-		// Demo mode - return demo comments
-		comments := getDemoComments(ticketID)
-		c.JSON(http.StatusOK, gin.H{
-			"comments": comments,
-			"total":    len(comments),
-		})
-		return
-	}
-
-	// Verify ticket exists
-	ticket, err := repo.GetByID(ticketID)
-	if err != nil {
-		apiErr := errors.NewDatabaseError("query", err)
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-	if ticket == nil {
-		apiErr := errors.NewTicketNotFound(ticketID)
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	comments, err := repo.GetComments(ticketID)
-	if err != nil {
-		apiErr := errors.NewDatabaseError("query", err)
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"comments": comments,
-		"total":    len(comments),
-	})
-}
-
-// AddCommentRequest represents the request to add a comment to a ticket
-type AddCommentRequest struct {
-	Content string `json:"content" binding:"required"`
-}
-
-// AddTicketComment adds a comment to a ticket
-func AddTicketComment(c *gin.Context) {
-	ticketID := c.Param("id")
-
-	var req AddCommentRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		apiErr := errors.NewValidation(err.Error())
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	// Get author from auth context
-	author, _ := c.Get("username")
-	authorStr := "system"
-	if a, ok := author.(string); ok && a != "" {
-		authorStr = a
-	}
-
-	repo := ticketRepo()
-	if repo == nil {
-		// Demo mode - return a demo comment
-		now := time.Now()
-		comment := models.Comment{
-			ID:        fmt.Sprintf("CMT-DEMO-%d", now.Unix()),
-			TicketID:  ticketID,
-			Author:    authorStr,
-			Content:   req.Content,
-			CreatedAt: now,
-			UpdatedAt: now,
-		}
-		logger.Info("Demo mode: Comment %s added to ticket %s", comment.ID, ticketID)
-		c.JSON(http.StatusCreated, gin.H{
-			"message": "Comment added successfully (demo mode)",
-			"comment": comment,
-		})
-		return
-	}
-
-	// Verify ticket exists
-	ticket, err := repo.GetByID(ticketID)
-	if err != nil {
-		apiErr := errors.NewDatabaseError("query", err)
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-	if ticket == nil {
-		apiErr := errors.NewTicketNotFound(ticketID)
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	// Generate comment ID
-	commentID := fmt.Sprintf("CMT-%s-%d", ticketID, time.Now().UnixNano())
-
-	comment := models.Comment{
-		ID:       commentID,
-		TicketID: ticketID,
-		Author:   authorStr,
-		Content:  req.Content,
-	}
-
-	if err := repo.AddComment(&comment); err != nil {
-		apiErr := errors.NewDatabaseError("create", err)
-		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
-		return
-	}
-
-	logger.Info("Comment %s added to ticket %s by %s", commentID, ticketID, authorStr)
-
-	// Send email notification to ticket assignee about the new comment
-	if ticket != nil {
-		go sendTicketEmailNotification(*ticket, "Commented",
-			fmt.Sprintf("A new comment was added to ticket %s by %s.", ticketID, authorStr),
-			req.Content, authorStr)
-	}
-
-	c.JSON(http.StatusCreated, gin.H{
-		"message": "Comment added successfully",
-		"comment": comment,
 	})
 }
