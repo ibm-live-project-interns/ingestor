@@ -114,6 +114,39 @@ func main() {
 			); err != nil {
 				logger.Warn("Auto-migration failed: %v", err)
 			}
+
+			// Fallback: explicitly add any columns that AutoMigrate may have
+			// silently failed to add on existing databases. ADD COLUMN IF NOT EXISTS
+			// is idempotent and safe to run on every startup.
+			userCols := []string{
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS google_id VARCHAR(100)`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_token TEXT`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS oauth_refresh TEXT`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS failed_attempts INTEGER NOT NULL DEFAULT 0`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS locked_until TIMESTAMPTZ`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_token VARCHAR(100)`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS verification_token_exp TIMESTAMPTZ`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS verified_at TIMESTAMPTZ`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token VARCHAR(100)`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS reset_token_exp TIMESTAMPTZ`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS email_alerts BOOLEAN NOT NULL DEFAULT TRUE`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS push_notifications BOOLEAN NOT NULL DEFAULT TRUE`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS sound_enabled BOOLEAN NOT NULL DEFAULT FALSE`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS critical_only BOOLEAN NOT NULL DEFAULT FALSE`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS theme VARCHAR(20) NOT NULL DEFAULT 'system'`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS language VARCHAR(20) NOT NULL DEFAULT 'en'`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS timezone VARCHAR(64) NOT NULL DEFAULT 'UTC'`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS auto_refresh BOOLEAN NOT NULL DEFAULT TRUE`,
+				`ALTER TABLE users ADD COLUMN IF NOT EXISTS refresh_interval VARCHAR(10) NOT NULL DEFAULT '30'`,
+				`CREATE INDEX IF NOT EXISTS idx_users_google_id ON users(google_id)`,
+				`CREATE INDEX IF NOT EXISTS idx_users_verification_token ON users(verification_token)`,
+				`CREATE INDEX IF NOT EXISTS idx_users_reset_token ON users(reset_token)`,
+			}
+			for _, sql := range userCols {
+				if err := db.Exec(sql).Error; err != nil {
+					logger.Debug("user column migration skipped: %v", err)
+				}
+			}
 		}
 	}
 
