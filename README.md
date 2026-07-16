@@ -244,6 +244,21 @@ curl http://localhost:8080/api/v1/alerts \
   -H "Authorization: Bearer <token>"
 ```
 
+## Security Hardening
+
+The API Gateway ships with the following security defaults:
+
+| Setting | Value | Override |
+|---------|-------|----------|
+| `GIN_MODE` | `release` (no stack traces in errors) | `GIN_MODE=debug` |
+| Request body cap | 4 MB (`RequestBodyLimit` middleware) | — |
+| PostgreSQL SSL | `require` | `POSTGRES_SSLMODE=disable` (local dev) |
+| Password strength | min-8 + uppercase + digit + special (registration AND `ChangePassword`) | — |
+| Trusted proxies | `0.0.0.0/0` (HF Spaces) | `TRUSTED_PROXIES=10.0.0.0/8` |
+| JWT secret | **Required** — app panics if missing | set `JWT_SECRET` env var |
+
+> **Local dev note:** Set `POSTGRES_SSLMODE=disable` in your `.env` if your local Postgres has no SSL cert.
+
 ## Health Checks
 
 ```bash

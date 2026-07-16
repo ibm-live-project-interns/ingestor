@@ -171,9 +171,18 @@ func main() {
 	}
 
 	// Setup Gin router
-	ginMode := config.GetEnv("GIN_MODE", "debug")
+	ginMode := config.GetEnv("GIN_MODE", "release")
 	gin.SetMode(ginMode)
 	router := gin.New()
+
+	// Trust only the proxies declared in TRUSTED_PROXIES (comma-separated CIDRs).
+	// Defaults to the full range so HuggingFace Spaces works out of the box.
+	// Narrow this to the actual HF proxy CIDR in production to prevent
+	// X-Forwarded-For spoofing that could bypass the per-IP rate limiter.
+	trustedProxies := splitAndTrimOrigins(config.GetEnv("TRUSTED_PROXIES", "0.0.0.0/0"))
+	if err := router.SetTrustedProxies(trustedProxies); err != nil {
+		logger.Warn("Failed to set trusted proxies: %v", err)
+	}
 
 	// 8.3 fix: Set request body size limit for multipart forms (8MB)
 	router.MaxMultipartMemory = 8 << 20
@@ -182,6 +191,7 @@ func main() {
 	router.Use(middleware.Recovery())
 	router.Use(middleware.RequestLogger())
 	router.Use(middleware.SecurityHeaders())
+	router.Use(middleware.RequestBodyLimit(4 << 20)) // 4 MB cap on JSON request bodies
 
 	// Rate limiting
 	if config.GetEnvBool("RATE_LIMIT_ENABLED", true) {

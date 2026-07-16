@@ -78,7 +78,9 @@ func generateOAuthExchangeCode() string {
 func computeOAuthStateHMAC(payload string) string {
 	secret := os.Getenv("JWT_SECRET")
 	if secret == "" {
-		secret = "noc-platform-dev-secret-key-2026"
+		// JWT_SECRET is mandatory — main() already Fatal-exits without it.
+		// Reaching here means a programming error (e.g. test harness bypass).
+		panic("JWT_SECRET must be set before computeOAuthStateHMAC is called")
 	}
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(payload))

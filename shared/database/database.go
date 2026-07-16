@@ -43,7 +43,7 @@ func DefaultDBConfig() DBConfig {
 		User:            config.GetEnv("POSTGRES_USER", "postgres"),
 		Password:        config.GetEnv("POSTGRES_PASSWORD", ""),
 		DBName:          config.GetEnv("POSTGRES_DB", "noc_alerts"),
-		SSLMode:         config.GetEnv("POSTGRES_SSLMODE", "disable"),
+		SSLMode:         config.GetEnv("POSTGRES_SSLMODE", "require"),
 		MaxIdleConns:    config.GetEnvInt("DB_MAX_IDLE_CONNS", 10),
 		MaxOpenConns:    config.GetEnvInt("DB_MAX_OPEN_CONNS", 100),
 		ConnMaxLifetime: time.Duration(config.GetEnvInt("DB_CONN_MAX_LIFETIME_MINS", 60)) * time.Minute,

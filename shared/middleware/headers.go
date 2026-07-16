@@ -1,10 +1,29 @@
 package middleware
 
 import (
+	"net/http"
 	"os"
 
 	"github.com/gin-gonic/gin"
 )
+
+// RequestBodyLimit caps incoming JSON request bodies at maxBytes.
+// Multipart limits are handled separately via router.MaxMultipartMemory.
+func RequestBodyLimit(maxBytes int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// Reject via Content-Length header before reading (fast path)
+		if c.Request.ContentLength > maxBytes {
+			c.AbortWithStatusJSON(http.StatusRequestEntityTooLarge, gin.H{
+				"error": "Request body too large",
+				"code":  "PAYLOAD_TOO_LARGE",
+			})
+			return
+		}
+		// Wrap the body reader so over-limit reads also return 413
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxBytes)
+		c.Next()
+	}
+}
 
 // SecurityHeaders returns a middleware that adds security headers.
 // CORS is handled exclusively by gin-contrib/cors in main.go — this middleware
