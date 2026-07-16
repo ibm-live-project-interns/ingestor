@@ -185,23 +185,39 @@ cd event_router && go run main.go
 
 ### Environment Variables
 
-Create `.env` file:
+Copy `.env.example` to `.env` and fill in values:
 
 ```bash
-# API Gateway
-API_GATEWAY_PORT=8080
-JWT_SECRET=your-secure-secret-key
-CORS_ALLOWED_ORIGINS=http://localhost:5173,http://localhost:3000
+cp .env.example .env
+```
 
-# Database
-POSTGRES_HOST=localhost
-POSTGRES_PORT=5432
-POSTGRES_USER=admin
-POSTGRES_PASSWORD=secret
-POSTGRES_DB=noc_alerts
+Key variables for the API Gateway:
 
-# Kafka
-KAFKA_BROKERS=localhost:9092
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `JWT_SECRET` | **Yes** | Min 32-char random string. App exits without it. |
+| `CORS_ALLOWED_ORIGINS` | Yes | Comma-separated allowed origins (include your frontend URL) |
+| `FRONTEND_URL` | Yes (prod) | Base URL of the UI (for OAuth redirects and email links) |
+| `POSTGRES_HOST` | No | DB host — omit to run in demo mode (no persistence) |
+| `GOOGLE_CLIENT_ID` | No | Google OAuth client ID (enables Google login button) |
+| `GOOGLE_CLIENT_SECRET` | No | Google OAuth client secret |
+| `GOOGLE_REDIRECT_URL` | No | Must match Google Cloud Console redirect URI |
+| `SMTP_HOST` | No | SMTP server — omit to disable email features |
+| `SMTP_USERNAME` | No | SMTP credentials |
+| `SMTP_PASSWORD` | No | SMTP credentials |
+| `INTERNAL_API_KEY` | No | API key for internal service-to-service calls |
+
+**Production (HuggingFace Spaces):** `https://bionicop-sentrix-api.hf.space`
+
+Set these in HF Spaces → Settings → Variables and Secrets:
+```
+JWT_SECRET=<strong random string>
+CORS_ALLOWED_ORIGINS=https://ui-bionics-projects.vercel.app,http://localhost:5173
+FRONTEND_URL=https://ui-bionics-projects.vercel.app
+GOOGLE_CLIENT_ID=<from Google Cloud Console>
+GOOGLE_CLIENT_SECRET=<from Google Cloud Console>
+GOOGLE_REDIRECT_URL=https://bionicop-sentrix-api.hf.space/api/v1/auth/google/callback
+POSTGRES_HOST=<your postgres host>
 ```
 
 All env vars use the shared `config.GetEnv()` helper with sensible defaults.
