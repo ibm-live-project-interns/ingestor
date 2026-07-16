@@ -268,9 +268,15 @@ func main() {
 			// Tickets - GET (view permissions handled by frontend)
 			protected.GET("/tickets", handlers.GetTickets)
 			protected.GET("/tickets/stats", handlers.GetTicketStats)
-			protected.GET("/tickets/export", handlers.ExportTickets)
 			protected.GET("/tickets/:id", handlers.GetTicketByID)
 			protected.GET("/tickets/:id/comments", handlers.GetTicketComments)
+
+			// Ticket export requires export-reports permission
+			ticketExport := protected.Group("")
+			ticketExport.Use(middleware.RequireAnyPermission(rbac.PermExportReports))
+			{
+				ticketExport.GET("/tickets/export", handlers.ExportTickets)
+			}
 
 			// Only users with create-tickets permission can modify tickets
 			ticketActions := protected.Group("")
@@ -318,13 +324,21 @@ func main() {
 			protected.PUT("/me", handlers.UpdateProfile)
 			protected.PUT("/me/password", handlers.ChangePassword)
 
-			// Reports (no extra RBAC, view permissions handled by frontend)
-			protected.GET("/reports/export", handlers.ExportReport)
+			// Reports export requires export-reports permission
+			reportsAdmin := protected.Group("")
+			reportsAdmin.Use(middleware.RequireAnyPermission(rbac.PermExportReports))
+			{
+				reportsAdmin.GET("/reports/export", handlers.ExportReport)
+			}
 
-			// SLA Reports
-			protected.GET("/reports/sla", handlers.GetSLAOverview)
-			protected.GET("/reports/sla/violations", handlers.GetSLAViolations)
-			protected.GET("/reports/sla/trend", handlers.GetSLATrend)
+			// SLA Reports require view-sla permission
+			slaAdmin := protected.Group("")
+			slaAdmin.Use(middleware.RequireAnyPermission(rbac.PermViewSLA))
+			{
+				slaAdmin.GET("/reports/sla", handlers.GetSLAOverview)
+				slaAdmin.GET("/reports/sla/violations", handlers.GetSLAViolations)
+				slaAdmin.GET("/reports/sla/trend", handlers.GetSLATrend)
+			}
 
 			// Audit logs restricted to sysadmin role
 			auditAdmin := protected.Group("")
@@ -339,12 +353,16 @@ func main() {
 			protected.GET("/on-call/schedule", handlers.GetOnCallSchedule)
 			protected.GET("/on-call/schedules", handlers.GetOnCallSchedules)
 
-			// On-Call Schedule CRUD (write - all authenticated users can manage schedules)
-			protected.POST("/on-call/schedules", handlers.CreateOnCallSchedule)
-			protected.PUT("/on-call/schedules/:id", handlers.UpdateOnCallSchedule)
-			protected.DELETE("/on-call/schedules/:id", handlers.DeleteOnCallSchedule)
-			protected.POST("/on-call/overrides", handlers.CreateOnCallOverride)
-			protected.DELETE("/on-call/overrides/:id", handlers.DeleteOnCallOverride)
+			// On-Call Schedule CRUD (write - sysadmin only)
+			onCallAdmin := protected.Group("")
+			onCallAdmin.Use(middleware.RequireRole(rbac.RoleSysAdmin))
+			{
+				onCallAdmin.POST("/on-call/schedules", handlers.CreateOnCallSchedule)
+				onCallAdmin.PUT("/on-call/schedules/:id", handlers.UpdateOnCallSchedule)
+				onCallAdmin.DELETE("/on-call/schedules/:id", handlers.DeleteOnCallSchedule)
+				onCallAdmin.POST("/on-call/overrides", handlers.CreateOnCallOverride)
+				onCallAdmin.DELETE("/on-call/overrides/:id", handlers.DeleteOnCallOverride)
+			}
 
 			// Network Topology
 			protected.GET("/topology", handlers.GetTopology)
@@ -451,8 +469,12 @@ func main() {
 				sysHealthAdmin.GET("/system/health", handlers.GetSystemHealth)
 			}
 
-			// Ingest (also available internally)
-			protected.POST("/events", handlers.IngestEvent)
+			// Ingest via JWT (sysadmin only — internal services use /api/internal/events with API key)
+			ingestAdmin := protected.Group("")
+			ingestAdmin.Use(middleware.RequireRole(rbac.RoleSysAdmin))
+			{
+				ingestAdmin.POST("/events", handlers.IngestEvent)
+			}
 		}
 	}
 

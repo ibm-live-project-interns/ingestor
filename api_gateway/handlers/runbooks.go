@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -593,14 +594,16 @@ func SuggestRunbooks(c *gin.Context) {
 		}
 		if query != "" {
 			queryLower := strings.ToLower(query)
+			titleLower := strings.ToLower(rb.Title)
+			descLower := strings.ToLower(rb.Description)
 			for _, word := range strings.Fields(queryLower) {
 				if len(word) < 3 {
 					continue
 				}
-				if strings.Contains(strings.ToLower(rb.Title), word) {
+				if strings.Contains(titleLower, word) {
 					score += 4
 				}
-				if strings.Contains(strings.ToLower(rb.Description), word) {
+				if strings.Contains(descLower, word) {
 					score += 2
 				}
 			}
@@ -613,15 +616,12 @@ func SuggestRunbooks(c *gin.Context) {
 		scored = append(scored, scoredRunbook{Runbook: rb, Score: score})
 	}
 
-	// Simple descending sort
-	for i := 0; i < len(scored); i++ {
-		for j := i + 1; j < len(scored); j++ {
-			if scored[j].Score > scored[i].Score ||
-				(scored[j].Score == scored[i].Score && scored[j].Runbook.UsageCount > scored[i].Runbook.UsageCount) {
-				scored[i], scored[j] = scored[j], scored[i]
-			}
+	sort.Slice(scored, func(i, j int) bool {
+		if scored[i].Score != scored[j].Score {
+			return scored[i].Score > scored[j].Score
 		}
-	}
+		return scored[i].Runbook.UsageCount > scored[j].Runbook.UsageCount
+	})
 
 	limit := 3
 	if len(scored) < limit {

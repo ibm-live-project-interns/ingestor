@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -574,10 +573,6 @@ func BulkAlertAction(c *gin.Context) {
 			aDevice := alert.Device
 			action := req.Action
 			go func() {
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-				defer cancel()
-				_ = ctx
-
 				var templateName, subjectPrefix, actorField string
 				switch action {
 				case "acknowledge":
