@@ -418,9 +418,9 @@ func getDemoPostMortem(alertID string) *models.PostMortem {
 			{"time": "15:15", "event": "All affected hosts confirmed reachable"}
 		]`),
 		ActionItems: json.RawMessage(`[
-			{"item": "Replace remaining first-gen SFP modules proactively", "assignee": "Network Team", "status": "in-progress"},
-			{"item": "Add temperature monitoring alerts for SFP modules", "assignee": "NOC", "status": "pending"},
-			{"item": "Update spare parts inventory with compatible SFP modules", "assignee": "Procurement", "status": "completed"}
+			{"description": "Replace remaining first-gen SFP modules proactively", "owner": "Network Team", "status": "in-progress"},
+			{"description": "Add temperature monitoring alerts for SFP modules", "owner": "NOC", "status": "pending"},
+			{"description": "Update spare parts inventory with compatible SFP modules", "owner": "Procurement", "status": "completed"}
 		]`),
 		PreventionMeasures: "Implement proactive SFP temperature monitoring with alerting thresholds at 60C (warning) and 70C (critical). Schedule quarterly hardware health audits for all core infrastructure.",
 		Status:             models.PostMortemStatusPublished,
