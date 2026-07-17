@@ -9,6 +9,7 @@ import (
 type PostMortem struct {
 	ID                 uint            `json:"id" gorm:"primaryKey"`
 	AlertID            uint            `json:"alert_id"`
+	AlertIDStr         string          `json:"alert_id_str,omitempty" gorm:"column:alert_id_str;size:50"`
 	Title              string          `json:"title" gorm:"size:500;not null"`
 	RootCause          string          `json:"root_cause" gorm:"type:text"`
 	RootCauseCategory  string          `json:"root_cause_category" gorm:"size:100"`
