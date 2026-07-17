@@ -145,6 +145,7 @@ func CreatePostMortem(c *gin.Context) {
 
 	postMortem := models.PostMortem{
 		AlertID:            uint(alertID),
+		AlertIDStr:         alertIDStr,
 		Title:              strings.TrimSpace(req.Title),
 		RootCause:          strings.TrimSpace(req.RootCause),
 		RootCauseCategory:  strings.ToLower(strings.TrimSpace(req.RootCauseCategory)),
@@ -197,9 +198,13 @@ func GetAlertPostMortem(c *gin.Context) {
 	if alertID > 0 {
 		err = db.Where("alert_id = ?", alertID).First(&postMortem).Error
 	} else {
-		// String-based alert IDs: return the most recent published post-mortem
-		err = db.Where("status IN ?", []string{"published", "review", "draft"}).
-			Order("created_at DESC").First(&postMortem).Error
+		// String-based alert IDs: query by alert_id_str column
+		err = db.Where("alert_id_str = ?", alertIDStr).Order("created_at DESC").First(&postMortem).Error
+		if err != nil {
+			// Fallback: most recent published post-mortem
+			err = db.Where("status IN ?", []string{"published", "review", "draft"}).
+				Order("created_at DESC").First(&postMortem).Error
+		}
 	}
 
 	if err != nil {

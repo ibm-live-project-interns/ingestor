@@ -97,6 +97,23 @@ func main() {
 			if err := db.Exec(`ALTER TABLE runbooks ALTER COLUMN steps TYPE JSONB USING CASE WHEN steps IS NULL OR steps = '' THEN '[]'::jsonb ELSE steps::jsonb END`).Error; err != nil {
 				logger.Debug("runbooks jsonb migration skipped: %v", err)
 			}
+			if err := db.Exec(`ALTER TABLE post_mortems ADD COLUMN IF NOT EXISTS alert_id_str VARCHAR(50)`).Error; err != nil {
+				logger.Debug("post_mortems alert_id_str migration skipped: %v", err)
+			}
+			// Backfill alert_id_str for known post-mortems based on title matching
+			backfills := []struct{ pattern, alertID string }{
+				{"%BGP%", "ALT-S001"},
+				{"%SFP Module%", "ALT-S004"},
+				{"%Out-of-Memory%", "ALT-S006"},
+			}
+			for _, b := range backfills {
+				if err := db.Exec(
+					`UPDATE post_mortems SET alert_id_str = ? WHERE title ILIKE ? AND (alert_id_str IS NULL OR alert_id_str = '')`,
+					b.alertID, b.pattern,
+				).Error; err != nil {
+					logger.Debug("post_mortems backfill skipped for %s: %v", b.alertID, err)
+				}
+			}
 
 			// Auto-migrate: adds new columns to existing tables, never drops columns.
 			// User and Session are included so OAuth columns (google_id, etc.) are
