@@ -67,10 +67,10 @@ func GetTrendsKPI(c *gin.Context) {
 		resRate = float64(resolvedCount) / float64(totalCount) * 100
 	}
 
-	// Calculate MTTR (placeholder - would need resolved_at and created_at difference)
+	// Calculate MTTR from alerts where resolved_at is after timestamp (valid resolutions only)
 	var avgMTTR float64
 	db.Model(&models.Alert{}).
-		Where("status = ? AND resolved_at IS NOT NULL", models.AlertStatusResolved).
+		Where("status = ? AND resolved_at IS NOT NULL AND resolved_at > timestamp", models.AlertStatusResolved).
 		Select("AVG(EXTRACT(EPOCH FROM (resolved_at - timestamp)) / 60)").
 		Scan(&avgMTTR)
 

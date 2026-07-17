@@ -217,9 +217,9 @@ func ChangePassword(c *gin.Context) {
 		return
 	}
 
-	// Validate minimum password length
-	if len(req.NewPassword) < 8 {
-		apiErr := errors.NewValidation("New password must be at least 8 characters long")
+	// Validate password strength (same rules as registration)
+	if err := validatePasswordStrength(req.NewPassword); err != nil {
+		apiErr := errors.NewValidation(err.Error())
 		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())
 		return
 	}
