@@ -114,6 +114,20 @@ func main() {
 					logger.Debug("post_mortems backfill skipped for %s: %v", b.alertID, err)
 				}
 			}
+			// Remove duplicate on-call schedule entries (keep earliest ID per user+period)
+			if err := db.Exec(`
+				DELETE FROM on_call_schedules WHERE id NOT IN (
+					SELECT MIN(id) FROM on_call_schedules GROUP BY user_id, start_time, end_time
+				)`).Error; err != nil {
+				logger.Debug("on_call_schedules dedup skipped: %v", err)
+			}
+			// Remove duplicate post-mortems (keep lowest ID per title)
+			if err := db.Exec(`
+				DELETE FROM post_mortems WHERE id NOT IN (
+					SELECT MIN(id) FROM post_mortems GROUP BY title
+				)`).Error; err != nil {
+				logger.Debug("post_mortems dedup skipped: %v", err)
+			}
 
 			// Auto-migrate: adds new columns to existing tables, never drops columns.
 			// User and Session are included so OAuth columns (google_id, etc.) are
