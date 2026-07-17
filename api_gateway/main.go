@@ -352,6 +352,9 @@ func main() {
 			protected.GET("/ai/insights", handlers.GetAIInsights)
 			protected.GET("/ai/impact-over-time", handlers.GetAIImpactOverTime)
 
+			// CVE feed (network security intelligence)
+			protected.GET("/cve/feed", handlers.GetCVEFeed)
+
 			// User Settings (self-service, no extra RBAC)
 			protected.GET("/settings/notifications", handlers.GetNotificationPreferences)
 			protected.PUT("/settings/notifications", handlers.UpdateNotificationPreferences)

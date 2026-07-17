@@ -155,7 +155,9 @@ func GetAlertDistributionTime(c *gin.Context) {
 		return
 	}
 
-	points, err := repo.GetAlertsOverTime(24)
+	// Use 7-day window so time-of-day distribution shows real data even when no
+	// alerts occurred in the last 24 hours (seed data is typically days old).
+	points, err := repo.GetAlertsOverTime(168)
 	if err != nil {
 		apiErr := errors.NewDatabaseError("query", err)
 		c.JSON(apiErr.HTTPStatus, apiErr.ToResponse())

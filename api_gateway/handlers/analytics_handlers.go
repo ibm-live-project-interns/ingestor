@@ -33,16 +33,16 @@ func GetTrendsKPI(c *gin.Context) {
 	}
 
 	now := time.Now().UTC()
-	last24h := now.Add(-24 * time.Hour)
-	prev24h := now.Add(-48 * time.Hour)
+	last7d := now.Add(-7 * 24 * time.Hour)
+	prev7d := now.Add(-14 * 24 * time.Hour)
 
-	// Current period alert count
+	// Current period alert count (last 7 days)
 	var currentCount int64
-	db.Model(&models.Alert{}).Where("timestamp >= ?", last24h).Count(&currentCount)
+	db.Model(&models.Alert{}).Where("timestamp >= ?", last7d).Count(&currentCount)
 
-	// Previous period alert count
+	// Previous period alert count (7–14 days ago)
 	var prevCount int64
-	db.Model(&models.Alert{}).Where("timestamp >= ? AND timestamp < ?", prev24h, last24h).Count(&prevCount)
+	db.Model(&models.Alert{}).Where("timestamp >= ? AND timestamp < ?", prev7d, last7d).Count(&prevCount)
 
 	// Calculate volume change
 	var volumeChange float64
@@ -359,7 +359,7 @@ func GetAIImpactOverTime(c *gin.Context) {
 		points = append(points, gin.H{
 			"date":                 dayStart.Format("2006-01-02"),
 			"alerts_processed":     alertCount,
-			"patterns_detected":    enrichedCount / 10, // Simplified
+			"patterns_detected":    enrichedCount,
 			"mttr_improvement_pct": improvementPct,
 		})
 	}
