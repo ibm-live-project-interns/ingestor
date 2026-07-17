@@ -128,6 +128,14 @@ func main() {
 				)`).Error; err != nil {
 				logger.Debug("post_mortems dedup skipped: %v", err)
 			}
+			// Fix alert-008: resolved_at is before timestamp due to legacy seed inversion.
+			// Set resolved_at to 45 minutes after timestamp so MTTR and SLA calcs include it.
+			if err := db.Exec(`
+				UPDATE alerts SET resolved_at = timestamp + INTERVAL '45 minutes'
+				WHERE id = 'alert-008' AND resolved_at IS NOT NULL AND resolved_at < timestamp
+			`).Error; err != nil {
+				logger.Debug("alert-008 timestamp fix skipped: %v", err)
+			}
 
 			// Auto-migrate: adds new columns to existing tables, never drops columns.
 			// User and Session are included so OAuth columns (google_id, etc.) are
