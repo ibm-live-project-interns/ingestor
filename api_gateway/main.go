@@ -500,6 +500,7 @@ func main() {
 
 			// Service Status (application-level health checks)
 			protected.GET("/service-status", handlers.GetServiceStatus)
+			protected.GET("/health/extended", handlers.GetServiceStatus)
 
 			// Docker Container Status & Logs — restricted to privileged roles
 			// because container logs can expose sensitive runtime state.
